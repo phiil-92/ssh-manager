@@ -15,6 +15,8 @@ export default function App() {
   const [version, setVersion] = useState("");
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+  const [sbWidth, setSbWidth] = useState(() => Number(localStorage.getItem("sbWidth")) || 260);
   const nextId = useRef(1);
   const workspaceRef = useRef(null);
 
@@ -22,6 +24,28 @@ export default function App() {
     api.vaultStatus().then(setVault).catch((e) => setError(e.message));
     fetch("/api/version").then((r) => r.json()).then((d) => setVersion(d.version));
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("theme", theme);
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem("sbWidth", String(sbWidth));
+  }, [sbWidth]);
+
+  function startSbResize(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sbWidth;
+    const move = (ev) => setSbWidth(Math.min(500, Math.max(180, startW + ev.clientX - startX)));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
 
   async function refreshData() {
     setHosts(await api.listHosts());
@@ -107,7 +131,21 @@ export default function App() {
   }
 
   function setStatus(id, status) {
-    setSessions((s) => s.map((x) => (x.id === id ? { ...x, status } : x)));
+    setSessions((s) =>
+      s.map((x) =>
+        x.id === id
+          ? {
+              ...x,
+              status,
+              connectedAt: status === "connected" ? x.connectedAt || Date.now() : x.connectedAt,
+            }
+          : x
+      )
+    );
+  }
+
+  function setStats(id, stats) {
+    setSessions((s) => s.map((x) => (x.id === id ? { ...x, stats } : x)));
   }
 
   function reorderTabs(fromIdx, toIdx) {
@@ -153,6 +191,12 @@ export default function App() {
         <span className="logo">SSH Manager</span>
         {vault.unlocked && (
           <div className="topbar-actions">
+            <button
+              className="btn btn-ghost"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark" ? "Light" : "Dark"}
+            </button>
             <button className="btn btn-ghost" onClick={() => setShowSettings(true)}>⚙</button>
             <button className="btn btn-ghost" onClick={handleLock}>Lock</button>
           </div>
@@ -170,7 +214,9 @@ export default function App() {
             onOpen={openSession}
             onChanged={refreshData}
             version={version}
+            width={sbWidth}
           />
+          <div className="sb-resizer" onPointerDown={startSbResize} />
           <main className="main-col">
             {sessions.length > 0 && (
               <TabBar
@@ -238,7 +284,9 @@ export default function App() {
                     <SshTerminal
                       hostId={s.host.id}
                       visible={isVisible}
+                      dark={theme === "dark"}
                       onStatus={(status) => setStatus(s.id, status)}
+                      onStats={(st) => setStats(s.id, st)}
                     />
                   </div>
                 );
@@ -249,6 +297,7 @@ export default function App() {
                 </div>
               )}
             </div>
+            <StatusBar session={sessions.find((s) => s.id === activeId)} />
           </main>
         </div>
       )}
@@ -268,6 +317,41 @@ export default function App() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ---------- Status bar for the focused session ---------- */
+function StatusBar({ session }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (!session || session.status !== "connected") return null;
+  const st = session.stats;
+
+  const gb = (b) => (b / 1024 ** 3).toFixed(1);
+  const dur = session.connectedAt ? Math.floor((Date.now() - session.connectedAt) / 1000) : null;
+  const fmtDur = (s) => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return h > 0 ? `${h}h ${m}m ${sec}s` : m > 0 ? `${m}m ${sec}s` : `${sec}s`;
+  };
+
+  return (
+    <div className="statusbar">
+      <span className="sb-item"><b>{session.host.name}</b></span>
+      <span className="sb-item">user: {st?.user ?? "…"}</span>
+      <span className="sb-item">ping: {st?.ping != null ? `${st.ping} ms` : "…"}</span>
+      <span className="sb-item">cpu: {st?.cpu != null ? `${st.cpu.toFixed(0)}%` : "…"}</span>
+      <span className="sb-item">
+        ram: {st?.memTotal ? `${gb(st.memUsed)} / ${gb(st.memTotal)} GB` : "…"}
+      </span>
+      <span className="sb-item">
+        disk: {st?.diskTotal ? `${gb(st.diskUsed)} / ${gb(st.diskTotal)} GB` : "…"}
+      </span>
+      <span className="sb-item">session: {dur != null ? fmtDur(dur) : "…"}</span>
     </div>
   );
 }
@@ -405,6 +489,7 @@ function TabBar({
     </div>
   );
 }
+
 function UnlockScreen({ setUp, onSubmit, error }) {
   const [pw, setPw] = useState("");
   return (
@@ -434,11 +519,13 @@ function UnlockScreen({ setUp, onSubmit, error }) {
   );
 }
 
-/* ---------- Sidebar with folders, tags, filter ---------- */
-function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version }) {
+/* ---------- Sidebar with folders (drag-to-file), tags, filter, favourites ---------- */
+function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version, width }) {
   const [formHost, setFormHost] = useState(undefined);
   const [collapsed, setCollapsed] = useState(() => new Set());
   const [filter, setFilter] = useState("");
+  const [dragHostId, setDragHostId] = useState(null);
+  const [dropTarget, setDropTarget] = useState(undefined); // folder id, null (=ungroup), or undefined
 
   const q = filter.trim().toLowerCase();
   const match = (h) =>
@@ -447,7 +534,8 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version 
     h.hostname.toLowerCase().includes(q) ||
     (h.tags || "").toLowerCase().includes(q);
 
-  const ungrouped = hosts.filter((h) => !h.folder_id && match(h));
+  const byFav = (a, b) => (b.favorite - a.favorite) || a.name.localeCompare(b.name);
+  const ungrouped = hosts.filter((h) => !h.folder_id && match(h)).sort(byFav);
 
   function toggleFolder(id) {
     setCollapsed((c) => {
@@ -465,10 +553,40 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version 
     }
   }
 
+  async function dropOn(folderId) {
+    const id = dragHostId;
+    setDragHostId(null);
+    setDropTarget(undefined);
+    if (id == null) return;
+    const host = hosts.find((h) => h.id === id);
+    if (!host || (host.folder_id ?? null) === folderId) return;
+    await api.updateHost(id, { folder_id: folderId });
+    onChanged();
+  }
+
+  const dropProps = (folderId) => ({
+    onDragOver: (e) => {
+      if (dragHostId == null) return;
+      e.preventDefault(); // required — without it the browser refuses the drop
+      setDropTarget(folderId);
+    },
+    onDragLeave: () => setDropTarget(undefined),
+    onDrop: (e) => {
+      e.preventDefault();
+      dropOn(folderId);
+    },
+  });
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-head">
-        <span>Hosts</span>
+    <aside className="sidebar" style={{ width }}>
+      <div
+        className={
+          "sidebar-head" +
+          (dragHostId != null && dropTarget === null ? " drop-target" : "")
+        }
+        {...dropProps(null)}
+      >
+        <span>{dragHostId != null ? "Drop here to unfile" : "Hosts"}</span>
         <div className="sidebar-head-actions">
           <button className="btn btn-small" onClick={addFolder}>+ Folder</button>
           <button
@@ -505,15 +623,23 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version 
             onOpen={onOpen}
             onEdit={() => setFormHost(h)}
             onChanged={onChanged}
+            onDragStartHost={setDragHostId}
+            onDragEndHost={() => { setDragHostId(null); setDropTarget(undefined); }}
           />
         ))}
 
         {folders.map((f) => {
-          const inFolder = hosts.filter((h) => h.folder_id === f.id && match(h));
+          const inFolder = hosts.filter((h) => h.folder_id === f.id && match(h)).sort(byFav);
           const isCollapsed = collapsed.has(f.id);
           return (
             <li key={`f${f.id}`} className="folder">
-              <div className="folder-head" onClick={() => toggleFolder(f.id)}>
+              <div
+                className={
+                  "folder-head" + (dropTarget === f.id ? " drop-target" : "")
+                }
+                onClick={() => toggleFolder(f.id)}
+                {...dropProps(f.id)}
+              >
                 <span className="chev">{isCollapsed ? "▸" : "▾"}</span>
                 <span className="folder-name">{f.name}</span>
                 <span className="muted small">({inFolder.length})</span>
@@ -553,6 +679,8 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version 
                       onOpen={onOpen}
                       onEdit={() => setFormHost(h)}
                       onChanged={onChanged}
+                      onDragStartHost={setDragHostId}
+                      onDragEndHost={() => { setDragHostId(null); setDropTarget(undefined); }}
                     />
                   ))}
                   {inFolder.length === 0 && (
@@ -583,11 +711,31 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version 
   );
 }
 
-function HostRow({ host: h, connected, onOpen, onEdit, onChanged }) {
+function HostRow({ host: h, connected, onOpen, onEdit, onChanged, onDragStartHost, onDragEndHost }) {
   const tags = (h.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
   return (
-    <li className="host" onClick={() => onOpen(h)}>
+    <li
+      className="host"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStartHost(h.id);
+      }}
+      onDragEnd={onDragEndHost}
+      onClick={() => onOpen(h)}
+    >
       <div className="host-name">
+        <button
+          className={"star" + (h.favorite ? " on" : "")}
+          title={h.favorite ? "Unfavourite" : "Favourite"}
+          onClick={async (e) => {
+            e.stopPropagation();
+            await api.updateHost(h.id, { favorite: !h.favorite });
+            onChanged();
+          }}
+        >
+          ★
+        </button>
         {connected && <span className="dot dot-connected" />}
         {h.name}
       </div>

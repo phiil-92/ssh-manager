@@ -29,6 +29,7 @@ html, body, #root {
   padding: 10px 16px;
   background: var(--accent);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  color: #fff;
 }
 
 .logo {
@@ -69,7 +70,6 @@ html, body, #root {
 }
 
 .sidebar {
-  width: 260px;
   background: var(--bg-panel);
   border-right: 1px solid var(--accent);
   display: flex;
@@ -90,6 +90,7 @@ html, body, #root {
   list-style: none;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .host {
@@ -429,4 +430,65 @@ select:focus { outline: none; border-color: var(--accent-light); }
   color: rgba(228, 226, 240, 0.4);
   font-size: 14px;
 }
+.drop-target {
+  background: rgba(78, 203, 113, 0.12) !important;
+  outline: 2px dashed #4ecb71;
+  outline-offset: -2px;
+}
+.host[draggable] { cursor: pointer; }
 
+
+/* ---------- resizable sidebar ---------- */
+.sb-resizer {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+}
+.sb-resizer:hover { background: var(--accent-light); }
+
+/* ---------- status bar ---------- */
+.statusbar {
+  display: flex;
+  gap: 18px;
+  padding: 6px 14px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--accent);
+  font-size: 12px;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.sb-item b { color: var(--accent-light); }
+
+/* ---------- favourite star ---------- */
+.star {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: rgba(143, 134, 212, 0.25);
+  padding: 0 4px 0 0;
+}
+.host:hover .star { color: rgba(143, 134, 212, 0.6); }
+.star.on, .host:hover .star.on { color: #e5c07b; }
+
+/* ---------- light theme ---------- */
+:root[data-theme="light"] {
+  --bg: #f2f1f7;
+  --bg-panel: #ffffff;
+  --text: #26233a;
+  --accent-light: #5c51a8;
+}
+[data-theme="light"] .muted { color: rgba(38, 35, 58, 0.55); }
+[data-theme="light"] .tab { background: #dcd8ee; color: rgba(38, 35, 58, 0.7); }
+[data-theme="light"] .tab.shown { background: #c8c1e6; color: #26233a; }
+[data-theme="light"] .tab.active { background: var(--accent); color: #fff; }
+[data-theme="light"] .host:hover { background: rgba(58, 51, 107, 0.08); }
+[data-theme="light"] .folder-head:hover { background: rgba(58, 51, 107, 0.06); }
+[data-theme="light"] .host-actions button {
+  background: rgba(58, 51, 107, 0.08);
+  color: #26233a;
+}
+[data-theme="light"] .repo-link { color: rgba(38, 35, 58, 0.5); }
+[data-theme="light"] .terminal-container { background: #fff; }
