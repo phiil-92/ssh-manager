@@ -21,8 +21,11 @@ export default function App() {
   const workspaceRef = useRef(null);
 
   useEffect(() => {
-    api.vaultStatus().then(setVault).catch((e) => setError(e.message));
-    fetch("/api/version").then((r) => r.json()).then((d) => setVersion(d.version));
+  api.vaultStatus().then((status) => {
+    setVault(status);
+    if (status.unlocked) refreshData();
+  }).catch((e) => setError(e.message));
+  fetch("/api/version").then((r) => r.json()).then((d) => setVersion(d.version));
   }, []);
 
   useEffect(() => {
@@ -142,6 +145,7 @@ export default function App() {
           : x
       )
     );
+    if (status === "connected") refreshData();
   }
 
   function setStats(id, stats) {
@@ -292,9 +296,7 @@ export default function App() {
                 );
               })}
               {sessions.length === 0 && (
-                <div className="center-screen muted">
-                  Click a host on the left to open a session.
-                </div>
+                <RecentHosts hosts={hosts} onOpen={openSession} />
               )}
             </div>
             <StatusBar session={sessions.find((s) => s.id === activeId)} />
@@ -317,6 +319,43 @@ export default function App() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ---------- Recent connections launcher (empty workspace) ---------- */
+function RecentHosts({ hosts, onOpen }) {
+  const recent = hosts
+    .filter((h) => h.last_connected_at)
+    .sort((a, b) => b.last_connected_at.localeCompare(a.last_connected_at))
+    .slice(0, 6);
+
+  if (recent.length === 0) {
+    return (
+      <div className="center-screen muted">
+        Click a host on the left to open a session.
+      </div>
+    );
+  }
+
+  return (
+    <div className="center-screen">
+      <div className="recent-wrap">
+        <div className="recent-title muted">Recent connections</div>
+        <div className="recent-grid">
+          {recent.map((h) => (
+            <button key={h.id} className="recent-card" onClick={() => onOpen(h)}>
+              <span className="recent-name">
+                {h.name}
+                {!!h.favorite && <span className="star-badge">★</span>}
+              </span>
+              <span className="recent-meta muted">
+                {h.username ? `${h.username}@` : ""}{h.hostname}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -698,14 +737,7 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version,
       </ul>
 
       <div className="sidebar-foot small">
-<a        
-          className="repo-link muted"
-          href="https://github.com/YOURUSERNAME/ssh-manager"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          v{version}
-        </a>
+        <a className="repo-link muted" href="https://github.com/phiil-92/ssh-manager" target="_blank" rel="noopener noreferrer">v{version}</a>
       </div>
     </aside>
   );
@@ -725,19 +757,9 @@ function HostRow({ host: h, connected, onOpen, onEdit, onChanged, onDragStartHos
       onClick={() => onOpen(h)}
     >
       <div className="host-name">
-        <button
-          className={"star" + (h.favorite ? " on" : "")}
-          title={h.favorite ? "Unfavourite" : "Favourite"}
-          onClick={async (e) => {
-            e.stopPropagation();
-            await api.updateHost(h.id, { favorite: !h.favorite });
-            onChanged();
-          }}
-        >
-          ★
-        </button>
         {connected && <span className="dot dot-connected" />}
         {h.name}
+        {!!h.favorite && <span className="star-badge">★</span>}
       </div>
       <div className="host-meta">
         {h.username ? `${h.username}@` : ""}{h.hostname}:{h.port}
@@ -778,6 +800,7 @@ function HostForm({ host, folders, onDone }) {
     clearPassword: false,
     folder_id: host?.folder_id || "",
     tags: host?.tags || "",
+    favorite: host?.favorite ? true : false,
   });
   const [error, setError] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -817,6 +840,14 @@ function HostForm({ host, folders, onDone }) {
         ))}
       </select>
       <input placeholder="Tags (comma separated)" value={f.tags} onChange={set("tags")} />
+      <label className="small muted checkline">
+        <input
+          type="checkbox"
+          checked={f.favorite}
+          onChange={(e) => setF({ ...f, favorite: e.target.checked })}
+        />
+        Favourite
+      </label>
       {editing && host.has_password && (
         <label className="small muted checkline">
           <input

@@ -462,16 +462,12 @@ select:focus { outline: none; border-color: var(--accent-light); }
 .sb-item b { color: var(--accent-light); }
 
 /* ---------- favourite star ---------- */
-.star {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 13px;
-  color: rgba(143, 134, 212, 0.25);
-  padding: 0 4px 0 0;
+.star-badge {
+  color: #e5c07b;
+  font-size: 12px;
+  margin-left: 6px;
 }
-.host:hover .star { color: rgba(143, 134, 212, 0.6); }
-.star.on, .host:hover .star.on { color: #e5c07b; }
+
 
 /* ---------- light theme ---------- */
 :root[data-theme="light"] {
@@ -492,3 +488,36 @@ select:focus { outline: none; border-color: var(--accent-light); }
 }
 [data-theme="light"] .repo-link { color: rgba(38, 35, 58, 0.5); }
 [data-theme="light"] .terminal-container { background: #fff; }
+
+/* ---------- recent connections ---------- */
+.recent-wrap { text-align: center; }
+.recent-title {
+  font-size: 13px;
+  margin-bottom: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.recent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 220px));
+  gap: 10px;
+  justify-content: center;
+  max-width: 720px;
+}
+.recent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(143, 134, 212, 0.35);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  color: var(--text);
+  text-align: left;
+}
+.recent-card:hover { border-color: var(--accent-light); background: rgba(58, 51, 107, 0.25); }
+[data-theme="light"] .recent-card:hover { background: rgba(58, 51, 107, 0.06); }
+.recent-name { font-size: 14px; font-weight: 600; }
+.recent-meta { font-size: 12px; }
