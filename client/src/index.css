@@ -1,0 +1,60 @@
+:root {
+  --accent: #3A336B;
+  --accent-light: #8f86d4;
+  --bg: #16141f;
+  --bg-panel: #1e1b2b;
+  --text: #e4e2f0;
+  --font-ui: "Segoe UI", "Segoe UI Variable", system-ui, -apple-system, sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.logo {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.phase-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;          /* critical: lets the terminal shrink properly */
+  padding: 10px;
+}
+
+.terminal-container {
+  height: 100%;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+  padding: 6px;
+}
