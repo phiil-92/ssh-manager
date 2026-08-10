@@ -87,7 +87,7 @@ app.delete("/api/folders/:id", requireUnlocked, (req, res) => {
 app.get("/api/hosts", requireUnlocked, (req, res) => {
   const hosts = db
     .prepare(
-      "SELECT id, name, hostname, port, username, folder_id, tags, favorite, (enc_password IS NOT NULL) AS has_password FROM hosts ORDER BY name"
+      "SELECT id, name, hostname, port, username, folder_id, tags, favorite, last_connected_at, (enc_password IS NOT NULL) AS has_password FROM hosts ORDER BY name"
     )
     .all();
   res.json(hosts);
@@ -276,7 +276,8 @@ wss.on("connection", (ws, req) => {
         stream = s;
         stream.setWindow(lastSize.rows, lastSize.cols, 0, 0);
         ws.send(JSON.stringify({ type: "status", status: "connected" }));
-        statsTimer = setInterval(pollStats, 5000);
+        db.prepare("UPDATE hosts SET last_connected_at = datetime('now') WHERE id = ?").run(host.id);
+	statsTimer = setInterval(pollStats, 5000);
         pollStats();
         stream.on("data", (chunk) => send(chunk.toString("utf8")));
         stream.on("close", () => {
