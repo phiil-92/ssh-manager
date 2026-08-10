@@ -46,8 +46,10 @@ html, body, #root {
 
 .workspace {
   flex: 1;
-  min-height: 0;          /* critical: lets the terminal shrink properly */
+  min-height: 0;
   padding: 10px;
+  display: flex;
+  flex-direction: column;
 }
 
 .terminal-container {
@@ -257,4 +259,59 @@ input:focus {
 
 .checkline { display: flex; align-items: center; gap: 6px; }
 
+/* ---------- status dots ---------- */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: #777;
+}
+.dot-connected { background: #4ecb71; }
+.dot-connecting { background: #e5c07b; }
+.dot-disconnected { background: #e06c75; }
 
+/* ---------- host action text buttons ---------- */
+.host-actions button {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(143, 134, 212, 0.15);
+  border: 1px solid rgba(143, 134, 212, 0.35);
+}
+.host-actions button:hover { background: var(--accent); }
+
+/* ---------- topbar ---------- */
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.btn-ghost { margin-left: 0; }
+
+/* ---------- modal ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal { width: 360px; }
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.modal h3 { font-size: 14px; margin-top: 8px; }
+.danger-title { color: #e06c75; }
+.btn-danger { background: #7a2b33; }
+.btn-danger:hover { background: #a03540; filter: none; }
+.success { color: #4ecb71; font-size: 12px; }
+
+/* ---------- tab dragging ---------- */
+.tab { user-select: none; }

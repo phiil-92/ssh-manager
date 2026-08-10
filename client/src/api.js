@@ -19,4 +19,7 @@ export const api = {
   addHost: (host) => req("/api/hosts", { method: "POST", body: JSON.stringify(host) }),
   deleteHost: (id) => req(`/api/hosts/${id}`, { method: "DELETE" }),
   updateHost: (id, host) => req(`/api/hosts/${id}`, { method: "PUT", body: JSON.stringify(host) }),
+  changeMasterPassword: (currentPassword, newPassword) =>
+    req("/api/vault/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
+  wipeAll: () => req("/api/vault/wipe", { method: "POST" }),
 };
