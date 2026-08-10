@@ -183,3 +183,78 @@ input:focus {
 .small { font-size: 12px; }
 .pad { padding: 12px; }
 .error { color: #e06c75; font-size: 12px; }
+
+/* ---------- tabs ---------- */
+.main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tabbar {
+  display: flex;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--accent);
+  overflow-x: auto;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  border-right: 1px solid rgba(143, 134, 212, 0.15);
+  white-space: nowrap;
+  color: rgba(228, 226, 240, 0.6);
+}
+
+.tab:hover { background: rgba(58, 51, 107, 0.3); }
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.tab-close {
+  opacity: 0.6;
+  font-size: 11px;
+}
+.tab-close:hover { opacity: 1; }
+
+.session {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+/* ---------- sidebar extras ---------- */
+.sidebar-foot {
+  padding: 8px 12px;
+  border-top: 1px solid rgba(143, 134, 212, 0.2);
+}
+
+.host-actions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+}
+.host:hover .host-actions { opacity: 1; }
+.host-actions button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  opacity: 0.7;
+}
+.host-actions button:hover { opacity: 1; }
+
+.checkline { display: flex; align-items: center; gap: 6px; }
+
+

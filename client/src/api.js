@@ -18,4 +18,5 @@ export const api = {
   listHosts: () => req("/api/hosts"),
   addHost: (host) => req("/api/hosts", { method: "POST", body: JSON.stringify(host) }),
   deleteHost: (id) => req(`/api/hosts/${id}`, { method: "DELETE" }),
+  updateHost: (id, host) => req(`/api/hosts/${id}`, { method: "PUT", body: JSON.stringify(host) }),
 };
