@@ -5,13 +5,13 @@ import { api } from "./api.js";
 export default function App() {
   const [vault, setVault] = useState(null);
   const [hosts, setHosts] = useState([]);
-  const [sessions, setSessions] = useState([]); // [{id, host, status}]
+  const [sessions, setSessions] = useState([]);   // creation order — NEVER reordered
+  const [tabOrder, setTabOrder] = useState([]);   // visual tab order — array of session ids
   const [activeId, setActiveId] = useState(null);
   const [version, setVersion] = useState("");
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const nextId = useRef(1);
-  const dragId = useRef(null);
 
   useEffect(() => {
     api.vaultStatus().then(setVault).catch((e) => setError(e.message));
@@ -37,6 +37,7 @@ export default function App() {
   async function handleLock() {
     await api.vaultLock();
     setSessions([]);
+    setTabOrder([]);
     setActiveId(null);
     setShowSettings(false);
     setVault({ ...vault, unlocked: false });
@@ -45,27 +46,26 @@ export default function App() {
   function openSession(host) {
     const id = nextId.current++;
     setSessions((s) => [...s, { id, host, status: "connecting" }]);
+    setTabOrder((o) => [...o, id]);
     setActiveId(id);
   }
 
   function closeSession(id) {
-    setSessions((s) => {
-      const remaining = s.filter((x) => x.id !== id);
-      if (activeId === id) setActiveId(remaining.length ? remaining[remaining.length - 1].id : null);
-      return remaining;
-    });
+    const remainingOrder = tabOrder.filter((x) => x !== id);
+    setTabOrder(remainingOrder);
+    setSessions((s) => s.filter((x) => x.id !== id));
+    if (activeId === id) {
+      setActiveId(remainingOrder.length ? remainingOrder[remainingOrder.length - 1] : null);
+    }
   }
 
   function setStatus(id, status) {
     setSessions((s) => s.map((x) => (x.id === id ? { ...x, status } : x)));
   }
 
-  function reorderTabs(fromId, toId) {
-    if (fromId === toId) return;
-    setSessions((s) => {
-      const arr = [...s];
-      const fromIdx = arr.findIndex((x) => x.id === fromId);
-      const toIdx = arr.findIndex((x) => x.id === toId);
+  function reorderTabs(fromIdx, toIdx) {
+    setTabOrder((o) => {
+      const arr = [...o];
       const [moved] = arr.splice(fromIdx, 1);
       arr.splice(toIdx, 0, moved);
       return arr;
@@ -103,30 +103,17 @@ export default function App() {
           />
           <main className="main-col">
             {sessions.length > 0 && (
-              <div className="tabbar">
-                {sessions.map((s) => (
-                  <div
-                    key={s.id}
-                    draggable
-                    onDragStart={() => (dragId.current = s.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => reorderTabs(dragId.current, s.id)}
-                    className={s.id === activeId ? "tab active" : "tab"}
-                    onClick={() => setActiveId(s.id)}
-                  >
-                    <span className={`dot dot-${s.status}`} />
-                    <span className="tab-title">{s.host.name}</span>
-                    <span
-                      className="tab-close"
-                      onClick={(e) => { e.stopPropagation(); closeSession(s.id); }}
-                    >
-                      ✕
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <TabBar
+                sessions={sessions}
+                tabOrder={tabOrder}
+                activeId={activeId}
+                onSelect={setActiveId}
+                onClose={closeSession}
+                onReorder={reorderTabs}
+              />
             )}
             <div className="workspace">
+              {/* rendered in creation order — reordering tabs never touches these */}
               {sessions.map((s) => (
                 <div
                   key={s.id}
@@ -155,6 +142,7 @@ export default function App() {
           onClose={() => setShowSettings(false)}
           onWiped={() => {
             setSessions([]);
+            setTabOrder([]);
             setActiveId(null);
             setShowSettings(false);
             setVault({ setUp: false, unlocked: false });
@@ -162,6 +150,108 @@ export default function App() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ---------- Tab bar with pointer-based drag ---------- */
+function TabBar({ sessions, tabOrder, activeId, onSelect, onClose, onReorder }) {
+  const refs = useRef({});
+  const dragData = useRef(null);
+  const suppressClick = useRef(false);
+  const [drag, setDrag] = useState(null); // {id, dx, fromIdx, toIdx, width}
+
+  const ordered = tabOrder
+    .map((id) => sessions.find((s) => s.id === id))
+    .filter(Boolean);
+
+  function onPointerDown(e, id, idx) {
+    if (e.button !== 0) return;
+    if (e.target.closest(".tab-close")) return; // closing, not dragging
+    const rects = ordered.map((s) => refs.current[s.id].getBoundingClientRect());
+    dragData.current = { id, fromIdx: idx, startX: e.clientX, rects, width: rects[idx].width, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e) {
+    const d = dragData.current;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    if (!d.moved && Math.abs(dx) < 4) return; // small tolerance so clicks stay clicks
+    d.moved = true;
+
+    // where is the dragged tab's center now, measured against original centers?
+    const center = d.rects[d.fromIdx].left + d.width / 2 + dx;
+    let toIdx = d.fromIdx;
+    if (dx > 0) {
+      for (let j = d.fromIdx + 1; j < d.rects.length; j++) {
+        if (center > d.rects[j].left + d.rects[j].width / 2) toIdx = j;
+      }
+    } else {
+      for (let j = d.fromIdx - 1; j >= 0; j--) {
+        if (center < d.rects[j].left + d.rects[j].width / 2) toIdx = j;
+      }
+    }
+    setDrag({ id: d.id, dx, fromIdx: d.fromIdx, toIdx, width: d.width });
+  }
+
+  function onPointerUp() {
+    const d = dragData.current;
+    if (!d) return;
+    dragData.current = null;
+    if (d.moved) {
+      suppressClick.current = true; // don't let the release also count as a click
+      if (drag && drag.toIdx !== drag.fromIdx) onReorder(drag.fromIdx, drag.toIdx);
+    }
+    setDrag(null);
+  }
+
+  function styleFor(idx, s) {
+    if (!drag) return undefined;
+    if (s.id === drag.id) {
+      return {
+        transform: `translateX(${drag.dx}px)`,
+        transition: "none",
+        zIndex: 10,
+        position: "relative",
+      };
+    }
+    // neighbors slide out of the way
+    if (drag.toIdx > drag.fromIdx && idx > drag.fromIdx && idx <= drag.toIdx) {
+      return { transform: `translateX(${-drag.width}px)` };
+    }
+    if (drag.toIdx < drag.fromIdx && idx >= drag.toIdx && idx < drag.fromIdx) {
+      return { transform: `translateX(${drag.width}px)` };
+    }
+    return undefined;
+  }
+
+  return (
+    <div className="tabbar">
+      {ordered.map((s, idx) => (
+        <div
+          key={s.id}
+          ref={(el) => (refs.current[s.id] = el)}
+          className={s.id === activeId ? "tab active" : "tab"}
+          style={styleFor(idx, s)}
+          onPointerDown={(e) => onPointerDown(e, s.id, idx)}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onClick={() => {
+            if (suppressClick.current) { suppressClick.current = false; return; }
+            onSelect(s.id);
+          }}
+        >
+          <span className={`dot dot-${s.status}`} />
+          <span className="tab-title">{s.host.name}</span>
+          <span
+            className="tab-close"
+            onClick={(e) => { e.stopPropagation(); onClose(s.id); }}
+          >
+            ✕
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
