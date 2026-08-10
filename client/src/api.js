@@ -22,4 +22,8 @@ export const api = {
   changeMasterPassword: (currentPassword, newPassword) =>
     req("/api/vault/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
   wipeAll: () => req("/api/vault/wipe", { method: "POST" }),
+  listFolders: () => req("/api/folders"),
+  addFolder: (name) => req("/api/folders", { method: "POST", body: JSON.stringify({ name }) }),
+  renameFolder: (id, name) => req(`/api/folders/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
+  deleteFolder: (id) => req(`/api/folders/${id}`, { method: "DELETE" }),
 };

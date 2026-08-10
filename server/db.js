@@ -23,6 +23,17 @@ db.exec(`
     folder_id INTEGER,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL
+  );
 `);
+
+// Migration: add tags column to existing databases
+const cols = db.prepare("PRAGMA table_info(hosts)").all();
+if (!cols.some((c) => c.name === "tags")) {
+  db.exec("ALTER TABLE hosts ADD COLUMN tags TEXT NOT NULL DEFAULT ''");
+}
 
 module.exports = db;

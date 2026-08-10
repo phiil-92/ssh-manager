@@ -214,13 +214,14 @@ input:focus {
   user-select: none;
   touch-action: none;          /* needed for pointer-drag to work on touchscreens */
   transition: transform 0.15s ease;
+  backround: #2B2652;
 }
 /* if i wanna add cursor grab symbol later, prolly not*/
 /* .tab:active { cursor: grabbing; } */
 
 .tab:hover { background: rgba(58, 51, 107, 0.3); }
 .tab.active {
-  background: var(--accent);
+  background: #4C4482;
   color: #fff;
 }
 
@@ -320,3 +321,112 @@ input:focus {
 
 /* ---------- tab dragging ---------- */
 .tab { user-select: none; }
+
+
+/* ---------- split view ---------- */
+.workspace { position: relative; }
+.workspace.split { flex-direction: row; gap: 8px; }
+
+.pane {
+  flex: 1;
+  min-width: 0;
+  border-radius: 6px;
+}
+.pane .terminal-container { border-color: rgba(143, 134, 212, 0.35); }
+.pane-focused .terminal-container { border-color: var(--accent-light); }
+
+.split-overlay {
+  position: absolute;
+  inset: 10px;
+  z-index: 50;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+.split-overlay .half {
+  flex: 1;
+  border: 2px dashed rgba(143, 134, 212, 0.35);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(143, 134, 212, 0.6);
+  font-weight: 600;
+  background: rgba(58, 51, 107, 0.12);
+}
+.split-overlay .half.active {
+  border-color: var(--accent-light);
+  color: var(--accent-light);
+  background: rgba(58, 51, 107, 0.35);
+}
+
+.split-exit { margin-left: auto; align-self: center; margin-right: 6px; }
+
+.tab.shown {
+  background: #3d3577;
+  color: #fff;
+}
+
+/* ---------- folders ---------- */
+.folder-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  position: relative;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(143, 134, 212, 0.12);
+}
+.folder-head:hover { background: rgba(58, 51, 107, 0.25); }
+.folder-head:hover .host-actions { opacity: 1; }
+.chev { width: 12px; color: var(--accent-light); }
+.folder-hosts { list-style: none; }
+.folder-hosts .host { padding-left: 26px; }
+
+/* ---------- tags ---------- */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.chip {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(143, 134, 212, 0.18);
+  border: 1px solid rgba(143, 134, 212, 0.35);
+  color: var(--accent-light);
+}
+
+/* ---------- sidebar extras ---------- */
+.sidebar-head-actions { display: flex; gap: 6px; }
+.filter-wrap {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(143, 134, 212, 0.2);
+}
+.filter-wrap input { width: 100%; }
+
+select {
+  background: var(--bg);
+  border: 1px solid rgba(143, 134, 212, 0.4);
+  border-radius: 5px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+select:focus { outline: none; border-color: var(--accent-light); }
+
+.pane-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed rgba(143, 134, 212, 0.4);
+  border-radius: 6px;
+  color: rgba(228, 226, 240, 0.4);
+  font-size: 14px;
+}
+
