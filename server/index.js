@@ -78,7 +78,6 @@ app.put("/api/folders/:id", requireUnlocked, (req, res) => {
 });
 
 app.delete("/api/folders/:id", requireUnlocked, (req, res) => {
-  // Hosts inside the folder are kept, just unfiled
   db.prepare("UPDATE hosts SET folder_id = NULL WHERE folder_id = ?").run(req.params.id);
   db.prepare("DELETE FROM folders WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
@@ -88,7 +87,7 @@ app.delete("/api/folders/:id", requireUnlocked, (req, res) => {
 app.get("/api/hosts", requireUnlocked, (req, res) => {
   const hosts = db
     .prepare(
-      "SELECT id, name, hostname, port, username, folder_id, tags, (enc_password IS NOT NULL) AS has_password FROM hosts ORDER BY name"
+      "SELECT id, name, hostname, port, username, folder_id, tags, favorite, (enc_password IS NOT NULL) AS has_password FROM hosts ORDER BY name"
     )
     .all();
   res.json(hosts);
@@ -111,13 +110,13 @@ app.put("/api/hosts/:id", requireUnlocked, (req, res) => {
   const host = db.prepare("SELECT * FROM hosts WHERE id = ?").get(req.params.id);
   if (!host) return res.status(404).json({ error: "Host not found" });
 
-  const { name, hostname, port, username, password, clearPassword, folder_id, tags } = req.body;
+  const { name, hostname, port, username, password, clearPassword, folder_id, tags, favorite } = req.body;
   let enc = host.enc_password;
   if (clearPassword) enc = null;
   else if (password) enc = vault.encrypt(password);
 
   db.prepare(
-    "UPDATE hosts SET name = ?, hostname = ?, port = ?, username = ?, enc_password = ?, folder_id = ?, tags = ? WHERE id = ?"
+    "UPDATE hosts SET name = ?, hostname = ?, port = ?, username = ?, enc_password = ?, folder_id = ?, tags = ?, favorite = ? WHERE id = ?"
   ).run(
     name ?? host.name,
     hostname ?? host.hostname,
@@ -126,6 +125,7 @@ app.put("/api/hosts/:id", requireUnlocked, (req, res) => {
     enc,
     folder_id === undefined ? host.folder_id : folder_id || null,
     tags ?? host.tags,
+    favorite === undefined ? host.favorite : favorite ? 1 : 0,
     req.params.id
   );
   res.json({ ok: true });
@@ -160,6 +160,65 @@ wss.on("connection", (ws, req) => {
   let stream = null;
   let lastSize = { cols: 80, rows: 24 };
   let promptHandler = null;
+
+  // ---- stats polling ----
+  let statsTimer = null;
+  let statsBusy = false;
+  let prevCpu = null;
+
+  function pollStats() {
+    if (statsBusy || !stream) return;
+    statsBusy = true;
+    const t0 = Date.now();
+    const cmd =
+      "head -1 /proc/stat; free -b | grep -i '^mem'; df -B1 --output=used,size / | tail -1; whoami";
+    ssh.exec(cmd, (err, s) => {
+      if (err) { statsBusy = false; return; }
+      let out = "";
+      let ping = null;
+      s.on("data", (d) => {
+        if (ping === null) ping = Date.now() - t0;
+        out += d.toString("utf8");
+      });
+      s.stderr.on("data", () => {});
+      s.on("close", () => {
+        statsBusy = false;
+        try {
+          const lines = out.trim().split("\n");
+          const cpuParts = lines[0].trim().split(/\s+/).slice(1).map(Number);
+          const total = cpuParts.reduce((a, b) => a + b, 0);
+          const idle = cpuParts[3] + (cpuParts[4] || 0);
+          let cpu = null;
+          if (prevCpu) {
+            const dt = total - prevCpu.total;
+            const di = idle - prevCpu.idle;
+            if (dt > 0) cpu = Math.max(0, Math.min(100, 100 * (1 - di / dt)));
+          }
+          prevCpu = { total, idle };
+
+          const mem = lines[1].trim().split(/\s+/);
+          const memTotal = Number(mem[1]);
+          const memAvail = Number(mem[6] ?? mem[3]);
+
+          const dsk = lines[2].trim().split(/\s+/);
+          const user = (lines[3] || "").trim();
+
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({
+              type: "stats",
+              ping,
+              cpu,
+              memUsed: memTotal - memAvail,
+              memTotal,
+              diskUsed: Number(dsk[0]),
+              diskTotal: Number(dsk[1]),
+              user,
+            }));
+          }
+        } catch { /* non-linux target or parse issue — just skip */ }
+      });
+    });
+  }
 
   ws.on("message", (raw) => {
     let msg;
@@ -201,7 +260,10 @@ wss.on("connection", (ws, req) => {
     });
   }
 
-  ws.on("close", () => ssh.end());
+  ws.on("close", () => {
+    if (statsTimer) clearInterval(statsTimer);
+    ssh.end();
+  });
 
   ssh.on("ready", () => {
     ssh.shell(
@@ -214,8 +276,11 @@ wss.on("connection", (ws, req) => {
         stream = s;
         stream.setWindow(lastSize.rows, lastSize.cols, 0, 0);
         ws.send(JSON.stringify({ type: "status", status: "connected" }));
+        statsTimer = setInterval(pollStats, 5000);
+        pollStats();
         stream.on("data", (chunk) => send(chunk.toString("utf8")));
         stream.on("close", () => {
+          if (statsTimer) clearInterval(statsTimer);
           ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
           ssh.end();
           ws.close();

@@ -35,5 +35,7 @@ const cols = db.prepare("PRAGMA table_info(hosts)").all();
 if (!cols.some((c) => c.name === "tags")) {
   db.exec("ALTER TABLE hosts ADD COLUMN tags TEXT NOT NULL DEFAULT ''");
 }
-
+if (!cols.some((c) => c.name === "favorite")) {
+  db.exec("ALTER TABLE hosts ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
+}
 module.exports = db;

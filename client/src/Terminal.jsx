@@ -3,11 +3,29 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-export default function SshTerminal({ hostId, visible, onStatus }) {
+const THEMES = {
+  dark: {
+    background: "#16141f",
+    foreground: "#e4e2f0",
+    cursor: "#8f86d4",
+    selectionBackground: "#3A336B",
+  },
+  light: {
+    background: "#ffffff",
+    foreground: "#26233a",
+    cursor: "#3A336B",
+    selectionBackground: "#c9c3ee",
+  },
+};
+
+export default function SshTerminal({ hostId, visible, dark, onStatus, onStats }) {
   const containerRef = useRef(null);
+  const termInstance = useRef(null);
   const resizeRef = useRef(() => {});
   const statusRef = useRef(onStatus);
+  const statsRef = useRef(onStats);
   statusRef.current = onStatus;
+  statsRef.current = onStats;
 
   useEffect(() => {
     const term = new Terminal({
@@ -15,13 +33,9 @@ export default function SshTerminal({ hostId, visible, onStatus }) {
       fontSize: 14,
       fontFamily: '"Cascadia Mono", "Consolas", "DejaVu Sans Mono", monospace',
       scrollback: 5000,
-      theme: {
-        background: "#16141f",
-        foreground: "#e4e2f0",
-        cursor: "#8f86d4",
-        selectionBackground: "#3A336B",
-      },
+      theme: dark ? THEMES.dark : THEMES.light,
     });
+    termInstance.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef.current);
@@ -33,6 +47,7 @@ export default function SshTerminal({ hostId, visible, onStatus }) {
       const msg = JSON.parse(ev.data);
       if (msg.type === "data") term.write(msg.data);
       if (msg.type === "status") statusRef.current?.(msg.status);
+      if (msg.type === "stats") statsRef.current?.(msg);
     };
     ws.onclose = () => {
       statusRef.current?.("disconnected");
@@ -72,6 +87,12 @@ export default function SshTerminal({ hostId, visible, onStatus }) {
   useEffect(() => {
     if (visible) requestAnimationFrame(() => resizeRef.current());
   }, [visible]);
+
+  useEffect(() => {
+    if (termInstance.current) {
+      termInstance.current.options.theme = dark ? THEMES.dark : THEMES.light;
+    }
+  }, [dark]);
 
   return <div ref={containerRef} className="terminal-container" />;
 }
