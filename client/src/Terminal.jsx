@@ -3,9 +3,11 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-export default function SshTerminal({ hostId, visible }) {
+export default function SshTerminal({ hostId, visible, onStatus }) {
   const containerRef = useRef(null);
   const resizeRef = useRef(() => {});
+  const statusRef = useRef(onStatus);
+  statusRef.current = onStatus;
 
   useEffect(() => {
     const term = new Terminal({
@@ -30,8 +32,12 @@ export default function SshTerminal({ hostId, visible }) {
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === "data") term.write(msg.data);
+      if (msg.type === "status") statusRef.current?.(msg.status);
     };
-    ws.onclose = () => term.write("\r\n\x1b[38;2;143;134;212m[connection closed]\x1b[0m\r\n");
+    ws.onclose = () => {
+      statusRef.current?.("disconnected");
+      term.write("\r\n\x1b[38;2;143;134;212m[connection closed]\x1b[0m\r\n");
+    };
 
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -49,7 +55,6 @@ export default function SshTerminal({ hostId, visible }) {
     });
 
     const sendResize = () => {
-      // fitting while hidden (display:none) produces garbage sizes — skip
       if (!containerRef.current || containerRef.current.offsetParent === null) return;
       fit.fit();
       if (ws.readyState === WebSocket.OPEN) {
@@ -62,13 +67,10 @@ export default function SshTerminal({ hostId, visible }) {
     ro.observe(containerRef.current);
 
     return () => { ro.disconnect(); ws.close(); term.dispose(); };
-  }, []); // created once per session — tab switches do NOT re-run this
+  }, []);
 
-  // when this tab becomes visible again, re-fit and focus
   useEffect(() => {
-    if (visible) {
-      requestAnimationFrame(() => resizeRef.current());
-    }
+    if (visible) requestAnimationFrame(() => resizeRef.current());
   }, [visible]);
 
   return <div ref={containerRef} className="terminal-container" />;

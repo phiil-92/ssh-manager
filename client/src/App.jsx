@@ -5,15 +5,16 @@ import { api } from "./api.js";
 export default function App() {
   const [vault, setVault] = useState(null);
   const [hosts, setHosts] = useState([]);
-  const [sessions, setSessions] = useState([]);       // [{id, host}]
+  const [sessions, setSessions] = useState([]); // [{id, host, status}]
   const [activeId, setActiveId] = useState(null);
   const [version, setVersion] = useState("");
   const [error, setError] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
   const nextId = useRef(1);
+  const dragId = useRef(null);
 
   useEffect(() => {
     api.vaultStatus().then(setVault).catch((e) => setError(e.message));
-    api.vaultVersion?.();
     fetch("/api/version").then((r) => r.json()).then((d) => setVersion(d.version));
   }, []);
 
@@ -37,12 +38,13 @@ export default function App() {
     await api.vaultLock();
     setSessions([]);
     setActiveId(null);
+    setShowSettings(false);
     setVault({ ...vault, unlocked: false });
   }
 
   function openSession(host) {
     const id = nextId.current++;
-    setSessions((s) => [...s, { id, host }]);
+    setSessions((s) => [...s, { id, host, status: "connecting" }]);
     setActiveId(id);
   }
 
@@ -54,6 +56,26 @@ export default function App() {
     });
   }
 
+  function setStatus(id, status) {
+    setSessions((s) => s.map((x) => (x.id === id ? { ...x, status } : x)));
+  }
+
+  function reorderTabs(fromId, toId) {
+    if (fromId === toId) return;
+    setSessions((s) => {
+      const arr = [...s];
+      const fromIdx = arr.findIndex((x) => x.id === fromId);
+      const toIdx = arr.findIndex((x) => x.id === toId);
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      return arr;
+    });
+  }
+
+  const connectedHostIds = new Set(
+    sessions.filter((s) => s.status === "connected").map((s) => s.host.id)
+  );
+
   if (!vault) return <div className="center-screen">Loading…</div>;
 
   return (
@@ -61,7 +83,10 @@ export default function App() {
       <header className="topbar">
         <span className="logo">SSH Manager</span>
         {vault.unlocked && (
-          <button className="btn btn-ghost" onClick={handleLock}>🔒 Lock</button>
+          <div className="topbar-actions">
+            <button className="btn btn-ghost" onClick={() => setShowSettings(true)}>⚙</button>
+            <button className="btn btn-ghost" onClick={handleLock}>Lock</button>
+          </div>
         )}
       </header>
 
@@ -71,6 +96,7 @@ export default function App() {
         <div className="layout">
           <Sidebar
             hosts={hosts}
+            connectedHostIds={connectedHostIds}
             onOpen={openSession}
             onChanged={refreshHosts}
             version={version}
@@ -81,9 +107,14 @@ export default function App() {
                 {sessions.map((s) => (
                   <div
                     key={s.id}
+                    draggable
+                    onDragStart={() => (dragId.current = s.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => reorderTabs(dragId.current, s.id)}
                     className={s.id === activeId ? "tab active" : "tab"}
                     onClick={() => setActiveId(s.id)}
                   >
+                    <span className={`dot dot-${s.status}`} />
                     <span className="tab-title">{s.host.name}</span>
                     <span
                       className="tab-close"
@@ -102,7 +133,11 @@ export default function App() {
                   className="session"
                   style={{ display: s.id === activeId ? "flex" : "none" }}
                 >
-                  <SshTerminal hostId={s.host.id} visible={s.id === activeId} />
+                  <SshTerminal
+                    hostId={s.host.id}
+                    visible={s.id === activeId}
+                    onStatus={(status) => setStatus(s.id, status)}
+                  />
                 </div>
               ))}
               {sessions.length === 0 && (
@@ -113,6 +148,19 @@ export default function App() {
             </div>
           </main>
         </div>
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onWiped={() => {
+            setSessions([]);
+            setActiveId(null);
+            setShowSettings(false);
+            setVault({ setUp: false, unlocked: false });
+            setHosts([]);
+          }}
+        />
       )}
     </div>
   );
@@ -147,8 +195,8 @@ function UnlockScreen({ setUp, onSubmit, error }) {
   );
 }
 
-function Sidebar({ hosts, onOpen, onChanged, version }) {
-  const [formHost, setFormHost] = useState(undefined); // undefined=closed, null=new, object=edit
+function Sidebar({ hosts, connectedHostIds, onOpen, onChanged, version }) {
+  const [formHost, setFormHost] = useState(undefined);
 
   return (
     <aside className="sidebar">
@@ -163,28 +211,24 @@ function Sidebar({ hosts, onOpen, onChanged, version }) {
       </div>
 
       {formHost !== undefined && (
-        <HostForm
-          host={formHost}
-          onDone={() => { setFormHost(undefined); onChanged(); }}
-        />
+        <HostForm host={formHost} onDone={() => { setFormHost(undefined); onChanged(); }} />
       )}
 
       <ul className="host-list">
         {hosts.map((h) => (
           <li key={h.id} className="host" onClick={() => onOpen(h)}>
-            <div className="host-name">{h.name}</div>
+            <div className="host-name">
+              {connectedHostIds.has(h.id) && <span className="dot dot-connected" />}
+              {h.name}
+            </div>
             <div className="host-meta">
               {h.username ? `${h.username}@` : ""}{h.hostname}:{h.port}
             </div>
             <div className="host-actions">
-              <button
-                title="Edit host"
-                onClick={(e) => { e.stopPropagation(); setFormHost(h); }}
-              >
-                ✎
+              <button onClick={(e) => { e.stopPropagation(); setFormHost(h); }}>
+                Edit
               </button>
               <button
-                title="Delete host"
                 onClick={async (e) => {
                   e.stopPropagation();
                   if (confirm(`Delete "${h.name}"?`)) {
@@ -193,7 +237,7 @@ function Sidebar({ hosts, onOpen, onChanged, version }) {
                   }
                 }}
               >
-                🗑
+                Delete
               </button>
             </div>
           </li>
@@ -257,6 +301,56 @@ function HostForm({ host, onDone }) {
       )}
       <button className="btn" onClick={save}>{editing ? "Save changes" : "Save host"}</button>
       {error && <p className="error">{error}</p>}
+    </div>
+  );
+}
+
+function SettingsModal({ onClose, onWiped }) {
+  const [cur, setCur] = useState("");
+  const [nw, setNw] = useState("");
+  const [nw2, setNw2] = useState("");
+  const [msg, setMsg] = useState("");
+  const [error, setError] = useState("");
+
+  async function changePw() {
+    setError(""); setMsg("");
+    if (nw !== nw2) return setError("New passwords do not match");
+    try {
+      await api.changeMasterPassword(cur, nw);
+      setMsg("Master password changed. Stored credentials were re-encrypted.");
+      setCur(""); setNw(""); setNw2("");
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function wipe() {
+    if (!confirm("Delete ALL hosts and credentials and reset the vault? This cannot be undone.")) return;
+    if (!confirm("Really sure? Everything will be gone.")) return;
+    await api.wipeAll();
+    onWiped();
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="card modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h2>Settings</h2>
+          <button className="btn btn-small btn-ghost" onClick={onClose}>✕</button>
+        </div>
+
+        <h3>Change master password</h3>
+        <input type="password" placeholder="Current password" value={cur} onChange={(e) => setCur(e.target.value)} />
+        <input type="password" placeholder="New password (min 8 chars)" value={nw} onChange={(e) => setNw(e.target.value)} />
+        <input type="password" placeholder="Repeat new password" value={nw2} onChange={(e) => setNw2(e.target.value)} />
+        <button className="btn" onClick={changePw}>Change password</button>
+
+        <h3 className="danger-title">Danger zone</h3>
+        <button className="btn btn-danger" onClick={wipe}>Delete ALL saved data</button>
+
+        {msg && <p className="success">{msg}</p>}
+        {error && <p className="error">{error}</p>}
+      </div>
     </div>
   );
 }
