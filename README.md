@@ -1,5 +1,5 @@
 ENTIRELY VIBE-CODED.
-SSH Connection Manager
+SSH Connection Manager meant for personal use.
 
 ## Features so far
 - AES256-GCM encrypted credential store
