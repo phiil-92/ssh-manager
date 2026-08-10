@@ -5,21 +5,27 @@ import { api } from "./api.js";
 export default function App() {
   const [vault, setVault] = useState(null);
   const [hosts, setHosts] = useState([]);
+  const [folders, setFolders] = useState([]);
   const [sessions, setSessions] = useState([]);   // creation order — NEVER reordered
-  const [tabOrder, setTabOrder] = useState([]);   // visual tab order — array of session ids
-  const [activeId, setActiveId] = useState(null);
+  const [tabOrder, setTabOrder] = useState([]);   // visual tab order
+  const [activeId, setActiveId] = useState(null); // focused session
+  const [split, setSplit] = useState(null);       // null or {leftId, rightId} (either can be null)
+  const [focusedPane, setFocusedPane] = useState("left");
+  const [splitHint, setSplitHint] = useState(null); // null | "left" | "right"
   const [version, setVersion] = useState("");
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const nextId = useRef(1);
+  const workspaceRef = useRef(null);
 
   useEffect(() => {
     api.vaultStatus().then(setVault).catch((e) => setError(e.message));
     fetch("/api/version").then((r) => r.json()).then((d) => setVersion(d.version));
   }, []);
 
-  async function refreshHosts() {
+  async function refreshData() {
     setHosts(await api.listHosts());
+    setFolders(await api.listFolders());
   }
 
   async function handleUnlock(password) {
@@ -28,7 +34,7 @@ export default function App() {
       if (!vault.setUp) await api.vaultSetup(password);
       else await api.vaultUnlock(password);
       setVault({ setUp: true, unlocked: true });
-      await refreshHosts();
+      await refreshData();
     } catch (e) {
       setError(e.message);
     }
@@ -39,6 +45,7 @@ export default function App() {
     setSessions([]);
     setTabOrder([]);
     setActiveId(null);
+    setSplit(null);
     setShowSettings(false);
     setVault({ ...vault, unlocked: false });
   }
@@ -47,6 +54,30 @@ export default function App() {
     const id = nextId.current++;
     setSessions((s) => [...s, { id, host, status: "connecting" }]);
     setTabOrder((o) => [...o, id]);
+    if (split) {
+      if (split.leftId == null) {
+        setSplit({ ...split, leftId: id });
+        setFocusedPane("left");
+      } else if (split.rightId == null) {
+        setSplit({ ...split, rightId: id });
+        setFocusedPane("right");
+      } else {
+        setSplit({ ...split, [focusedPane === "left" ? "leftId" : "rightId"]: id });
+      }
+    }
+    setActiveId(id);
+  }
+
+  function selectTab(id) {
+    if (!split) return setActiveId(id);
+    // already visible? just focus it
+    if (split.leftId === id) { setFocusedPane("left"); setActiveId(id); return; }
+    if (split.rightId === id) { setFocusedPane("right"); setActiveId(id); return; }
+    const next = { ...split };
+    if (next.leftId == null) { next.leftId = id; setFocusedPane("left"); }
+    else if (next.rightId == null) { next.rightId = id; setFocusedPane("right"); }
+    else next[focusedPane === "left" ? "leftId" : "rightId"] = id;
+    setSplit(next);
     setActiveId(id);
   }
 
@@ -54,7 +85,23 @@ export default function App() {
     const remainingOrder = tabOrder.filter((x) => x !== id);
     setTabOrder(remainingOrder);
     setSessions((s) => s.filter((x) => x.id !== id));
-    if (activeId === id) {
+
+    if (split && (split.leftId === id || split.rightId === id)) {
+      const next = { ...split };
+      if (next.leftId === id) next.leftId = null;
+      if (next.rightId === id) next.rightId = null;
+      if (next.leftId == null && next.rightId == null) {
+        setSplit(null);
+        setActiveId(remainingOrder.length ? remainingOrder[remainingOrder.length - 1] : null);
+      } else {
+        setSplit(next);
+        if (activeId === id) {
+          const survivor = next.leftId ?? next.rightId;
+          setActiveId(survivor);
+          setFocusedPane(next.leftId != null ? "left" : "right");
+        }
+      }
+    } else if (activeId === id) {
       setActiveId(remainingOrder.length ? remainingOrder[remainingOrder.length - 1] : null);
     }
   }
@@ -71,6 +118,28 @@ export default function App() {
       return arr;
     });
   }
+
+  // drop a tab on a workspace half — occupies that side only; other side stays as-is (or empty)
+  function handleSplitDrop(id, side) {
+    setSplitHint(null);
+    const next = split ? { ...split } : { leftId: null, rightId: null };
+    if (next.leftId === id) next.leftId = null;
+    if (next.rightId === id) next.rightId = null;
+    next[side === "left" ? "leftId" : "rightId"] = id;
+    setSplit(next);
+    setFocusedPane(side);
+    setActiveId(id);
+  }
+
+  function exitSplit() {
+    setSplit(null);
+    // focused session becomes the single view; if a placeholder was focused, fall back
+    if (activeId == null && tabOrder.length) setActiveId(tabOrder[tabOrder.length - 1]);
+  }
+
+  const visibleIds = split
+    ? new Set([split.leftId, split.rightId].filter((x) => x != null))
+    : new Set(activeId != null ? [activeId] : []);
 
   const connectedHostIds = new Set(
     sessions.filter((s) => s.status === "connected").map((s) => s.host.id)
@@ -96,9 +165,10 @@ export default function App() {
         <div className="layout">
           <Sidebar
             hosts={hosts}
+            folders={folders}
             connectedHostIds={connectedHostIds}
             onOpen={openSession}
-            onChanged={refreshHosts}
+            onChanged={refreshData}
             version={version}
           />
           <main className="main-col">
@@ -107,26 +177,72 @@ export default function App() {
                 sessions={sessions}
                 tabOrder={tabOrder}
                 activeId={activeId}
-                onSelect={setActiveId}
+                visibleIds={visibleIds}
+                split={!!split}
+                workspaceRef={workspaceRef}
+                onSelect={selectTab}
                 onClose={closeSession}
                 onReorder={reorderTabs}
+                onSplitHint={setSplitHint}
+                onSplitDrop={handleSplitDrop}
+                onExitSplit={exitSplit}
               />
             )}
-            <div className="workspace">
-              {/* rendered in creation order — reordering tabs never touches these */}
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className="session"
-                  style={{ display: s.id === activeId ? "flex" : "none" }}
-                >
-                  <SshTerminal
-                    hostId={s.host.id}
-                    visible={s.id === activeId}
-                    onStatus={(status) => setStatus(s.id, status)}
-                  />
+            <div
+              ref={workspaceRef}
+              className={split ? "workspace split" : "workspace"}
+            >
+              {splitHint && (
+                <div className="split-overlay">
+                  <div className={splitHint === "left" ? "half active" : "half"}>
+                    Drop left
+                  </div>
+                  <div className={splitHint === "right" ? "half active" : "half"}>
+                    Drop right
+                  </div>
                 </div>
-              ))}
+              )}
+              {split && split.leftId == null && (
+                <div className="pane pane-placeholder" style={{ order: 0 }}>
+                  Drag a tab here
+                </div>
+              )}
+              {split && split.rightId == null && (
+                <div className="pane pane-placeholder" style={{ order: 1 }}>
+                  Drag a tab here
+                </div>
+              )}
+              {sessions.map((s) => {
+                const isVisible = visibleIds.has(s.id);
+                const paneOrder = split && s.id === split.rightId ? 1 : 0;
+                const isFocusedPane =
+                  split &&
+                  isVisible &&
+                  (focusedPane === "left" ? split.leftId : split.rightId) === s.id;
+                return (
+                  <div
+                    key={s.id}
+                    className={
+                      "session" +
+                      (split && isVisible ? " pane" : "") +
+                      (isFocusedPane ? " pane-focused" : "")
+                    }
+                    style={{ display: isVisible ? "flex" : "none", order: paneOrder }}
+                    onPointerDown={() => {
+                      if (split && isVisible) {
+                        setFocusedPane(s.id === split.rightId ? "right" : "left");
+                        setActiveId(s.id);
+                      }
+                    }}
+                  >
+                    <SshTerminal
+                      hostId={s.host.id}
+                      visible={isVisible}
+                      onStatus={(status) => setStatus(s.id, status)}
+                    />
+                  </div>
+                );
+              })}
               {sessions.length === 0 && (
                 <div className="center-screen muted">
                   Click a host on the left to open a session.
@@ -144,9 +260,11 @@ export default function App() {
             setSessions([]);
             setTabOrder([]);
             setActiveId(null);
+            setSplit(null);
             setShowSettings(false);
             setVault({ setUp: false, unlocked: false });
             setHosts([]);
+            setFolders([]);
           }}
         />
       )}
@@ -154,12 +272,15 @@ export default function App() {
   );
 }
 
-/* ---------- Tab bar with pointer-based drag ---------- */
-function TabBar({ sessions, tabOrder, activeId, onSelect, onClose, onReorder }) {
+/* ---------- Tab bar: drag horizontally = reorder, drag into a workspace half = split ---------- */
+function TabBar({
+  sessions, tabOrder, activeId, visibleIds, split, workspaceRef,
+  onSelect, onClose, onReorder, onSplitHint, onSplitDrop, onExitSplit,
+}) {
   const refs = useRef({});
   const dragData = useRef(null);
   const suppressClick = useRef(false);
-  const [drag, setDrag] = useState(null); // {id, dx, fromIdx, toIdx, width}
+  const [drag, setDrag] = useState(null); // {id, dx, dy, fromIdx, toIdx, width, splitSide}
 
   const ordered = tabOrder
     .map((id) => sessions.find((s) => s.id === id))
@@ -167,9 +288,13 @@ function TabBar({ sessions, tabOrder, activeId, onSelect, onClose, onReorder }) 
 
   function onPointerDown(e, id, idx) {
     if (e.button !== 0) return;
-    if (e.target.closest(".tab-close")) return; // closing, not dragging
+    if (e.target.closest(".tab-close")) return;
     const rects = ordered.map((s) => refs.current[s.id].getBoundingClientRect());
-    dragData.current = { id, fromIdx: idx, startX: e.clientX, rects, width: rects[idx].width, moved: false };
+    dragData.current = {
+      id, fromIdx: idx,
+      startX: e.clientX, startY: e.clientY,
+      rects, width: rects[idx].width, moved: false, splitSide: null,
+    };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
 
@@ -177,31 +302,44 @@ function TabBar({ sessions, tabOrder, activeId, onSelect, onClose, onReorder }) 
     const d = dragData.current;
     if (!d) return;
     const dx = e.clientX - d.startX;
-    if (!d.moved && Math.abs(dx) < 4) return; // small tolerance so clicks stay clicks
+    const dy = e.clientY - d.startY;
+    if (!d.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     d.moved = true;
 
-    // where is the dragged tab's center now, measured against original centers?
-    const center = d.rects[d.fromIdx].left + d.width / 2 + dx;
+    // over the workspace? which half?
+    let splitSide = null;
+    const wsRect = workspaceRef.current?.getBoundingClientRect();
+    if (wsRect && e.clientY > wsRect.top) {
+      splitSide = e.clientX < wsRect.left + wsRect.width / 2 ? "left" : "right";
+    }
+    d.splitSide = splitSide;
+    onSplitHint(splitSide);
+
     let toIdx = d.fromIdx;
-    if (dx > 0) {
-      for (let j = d.fromIdx + 1; j < d.rects.length; j++) {
-        if (center > d.rects[j].left + d.rects[j].width / 2) toIdx = j;
-      }
-    } else {
-      for (let j = d.fromIdx - 1; j >= 0; j--) {
-        if (center < d.rects[j].left + d.rects[j].width / 2) toIdx = j;
+    if (!splitSide) {
+      const center = d.rects[d.fromIdx].left + d.width / 2 + dx;
+      if (dx > 0) {
+        for (let j = d.fromIdx + 1; j < d.rects.length; j++) {
+          if (center > d.rects[j].left + d.rects[j].width / 2) toIdx = j;
+        }
+      } else {
+        for (let j = d.fromIdx - 1; j >= 0; j--) {
+          if (center < d.rects[j].left + d.rects[j].width / 2) toIdx = j;
+        }
       }
     }
-    setDrag({ id: d.id, dx, fromIdx: d.fromIdx, toIdx, width: d.width });
+    setDrag({ id: d.id, dx, dy, fromIdx: d.fromIdx, toIdx, width: d.width, splitSide });
   }
 
   function onPointerUp() {
     const d = dragData.current;
     if (!d) return;
     dragData.current = null;
+    onSplitHint(null);
     if (d.moved) {
-      suppressClick.current = true; // don't let the release also count as a click
-      if (drag && drag.toIdx !== drag.fromIdx) onReorder(drag.fromIdx, drag.toIdx);
+      suppressClick.current = true;
+      if (d.splitSide) onSplitDrop(d.id, d.splitSide);
+      else if (drag && drag.toIdx !== drag.fromIdx) onReorder(drag.fromIdx, drag.toIdx);
     }
     setDrag(null);
   }
@@ -210,13 +348,14 @@ function TabBar({ sessions, tabOrder, activeId, onSelect, onClose, onReorder }) 
     if (!drag) return undefined;
     if (s.id === drag.id) {
       return {
-        transform: `translateX(${drag.dx}px)`,
+        transform: `translate(${drag.dx}px, ${drag.splitSide ? drag.dy : 0}px)`,
         transition: "none",
         zIndex: 10,
         position: "relative",
+        opacity: drag.splitSide ? 0.7 : 1,
       };
     }
-    // neighbors slide out of the way
+    if (drag.splitSide) return undefined;
     if (drag.toIdx > drag.fromIdx && idx > drag.fromIdx && idx <= drag.toIdx) {
       return { transform: `translateX(${-drag.width}px)` };
     }
@@ -232,7 +371,13 @@ function TabBar({ sessions, tabOrder, activeId, onSelect, onClose, onReorder }) 
         <div
           key={s.id}
           ref={(el) => (refs.current[s.id] = el)}
-          className={s.id === activeId ? "tab active" : "tab"}
+          className={
+            s.id === activeId
+              ? "tab active"
+              : visibleIds.has(s.id)
+              ? "tab shown"
+              : "tab"
+          }
           style={styleFor(idx, s)}
           onPointerDown={(e) => onPointerDown(e, s.id, idx)}
           onPointerMove={onPointerMove}
@@ -252,10 +397,14 @@ function TabBar({ sessions, tabOrder, activeId, onSelect, onClose, onReorder }) 
           </span>
         </div>
       ))}
+      {split && (
+        <button className="btn btn-small split-exit" onClick={onExitSplit}>
+          Single view
+        </button>
+      )}
     </div>
   );
 }
-
 function UnlockScreen({ setUp, onSubmit, error }) {
   const [pw, setPw] = useState("");
   return (
@@ -285,64 +434,192 @@ function UnlockScreen({ setUp, onSubmit, error }) {
   );
 }
 
-function Sidebar({ hosts, connectedHostIds, onOpen, onChanged, version }) {
+/* ---------- Sidebar with folders, tags, filter ---------- */
+function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version }) {
   const [formHost, setFormHost] = useState(undefined);
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [filter, setFilter] = useState("");
+
+  const q = filter.trim().toLowerCase();
+  const match = (h) =>
+    !q ||
+    h.name.toLowerCase().includes(q) ||
+    h.hostname.toLowerCase().includes(q) ||
+    (h.tags || "").toLowerCase().includes(q);
+
+  const ungrouped = hosts.filter((h) => !h.folder_id && match(h));
+
+  function toggleFolder(id) {
+    setCollapsed((c) => {
+      const n = new Set(c);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+
+  async function addFolder() {
+    const name = window.prompt("Folder name:");
+    if (name?.trim()) {
+      await api.addFolder(name.trim());
+      onChanged();
+    }
+  }
 
   return (
     <aside className="sidebar">
       <div className="sidebar-head">
         <span>Hosts</span>
-        <button
-          className="btn btn-small"
-          onClick={() => setFormHost(formHost === undefined ? null : undefined)}
-        >
-          {formHost !== undefined ? "✕" : "+ Add"}
-        </button>
+        <div className="sidebar-head-actions">
+          <button className="btn btn-small" onClick={addFolder}>+ Folder</button>
+          <button
+            className="btn btn-small"
+            onClick={() => setFormHost(formHost === undefined ? null : undefined)}
+          >
+            {formHost !== undefined ? "✕" : "+ Add"}
+          </button>
+        </div>
+      </div>
+
+      <div className="filter-wrap">
+        <input
+          placeholder="Filter by name, host, tag…"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
       </div>
 
       {formHost !== undefined && (
-        <HostForm host={formHost} onDone={() => { setFormHost(undefined); onChanged(); }} />
+        <HostForm
+          host={formHost}
+          folders={folders}
+          onDone={() => { setFormHost(undefined); onChanged(); }}
+        />
       )}
 
       <ul className="host-list">
-        {hosts.map((h) => (
-          <li key={h.id} className="host" onClick={() => onOpen(h)}>
-            <div className="host-name">
-              {connectedHostIds.has(h.id) && <span className="dot dot-connected" />}
-              {h.name}
-            </div>
-            <div className="host-meta">
-              {h.username ? `${h.username}@` : ""}{h.hostname}:{h.port}
-            </div>
-            <div className="host-actions">
-              <button onClick={(e) => { e.stopPropagation(); setFormHost(h); }}>
-                Edit
-              </button>
-              <button
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  if (confirm(`Delete "${h.name}"?`)) {
-                    await api.deleteHost(h.id);
-                    onChanged();
-                  }
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </li>
+        {ungrouped.map((h) => (
+          <HostRow
+            key={h.id}
+            host={h}
+            connected={connectedHostIds.has(h.id)}
+            onOpen={onOpen}
+            onEdit={() => setFormHost(h)}
+            onChanged={onChanged}
+          />
         ))}
+
+        {folders.map((f) => {
+          const inFolder = hosts.filter((h) => h.folder_id === f.id && match(h));
+          const isCollapsed = collapsed.has(f.id);
+          return (
+            <li key={`f${f.id}`} className="folder">
+              <div className="folder-head" onClick={() => toggleFolder(f.id)}>
+                <span className="chev">{isCollapsed ? "▸" : "▾"}</span>
+                <span className="folder-name">{f.name}</span>
+                <span className="muted small">({inFolder.length})</span>
+                <div className="host-actions">
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const name = window.prompt("Rename folder:", f.name);
+                      if (name?.trim()) {
+                        await api.renameFolder(f.id, name.trim());
+                        onChanged();
+                      }
+                    }}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (confirm(`Delete folder "${f.name}"? Hosts inside are kept.`)) {
+                        await api.deleteFolder(f.id);
+                        onChanged();
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+              {!isCollapsed && (
+                <ul className="folder-hosts">
+                  {inFolder.map((h) => (
+                    <HostRow
+                      key={h.id}
+                      host={h}
+                      connected={connectedHostIds.has(h.id)}
+                      onOpen={onOpen}
+                      onEdit={() => setFormHost(h)}
+                      onChanged={onChanged}
+                    />
+                  ))}
+                  {inFolder.length === 0 && (
+                    <li className="muted small pad">Empty</li>
+                  )}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+
         {hosts.length === 0 && formHost === undefined && (
           <li className="muted small pad">No hosts yet.</li>
         )}
       </ul>
 
-      <div className="sidebar-foot muted small">v{version}</div>
+      <div className="sidebar-foot small">
+<a        
+          className="repo-link muted"
+          href="https://github.com/YOURUSERNAME/ssh-manager"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          v{version}
+        </a>
+      </div>
     </aside>
   );
 }
 
-function HostForm({ host, onDone }) {
+function HostRow({ host: h, connected, onOpen, onEdit, onChanged }) {
+  const tags = (h.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+  return (
+    <li className="host" onClick={() => onOpen(h)}>
+      <div className="host-name">
+        {connected && <span className="dot dot-connected" />}
+        {h.name}
+      </div>
+      <div className="host-meta">
+        {h.username ? `${h.username}@` : ""}{h.hostname}:{h.port}
+      </div>
+      {tags.length > 0 && (
+        <div className="chips">
+          {tags.map((t) => (
+            <span key={t} className="chip">{t}</span>
+          ))}
+        </div>
+      )}
+      <div className="host-actions">
+        <button onClick={(e) => { e.stopPropagation(); onEdit(); }}>Edit</button>
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (confirm(`Delete "${h.name}"?`)) {
+              await api.deleteHost(h.id);
+              onChanged();
+            }
+          }}
+        >
+          Delete
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function HostForm({ host, folders, onDone }) {
   const editing = !!host;
   const [f, setF] = useState({
     name: host?.name || "",
@@ -351,6 +628,8 @@ function HostForm({ host, onDone }) {
     username: host?.username || "",
     password: "",
     clearPassword: false,
+    folder_id: host?.folder_id || "",
+    tags: host?.tags || "",
   });
   const [error, setError] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -358,7 +637,11 @@ function HostForm({ host, onDone }) {
   async function save() {
     setError("");
     try {
-      const payload = { ...f, port: Number(f.port) || 22 };
+      const payload = {
+        ...f,
+        port: Number(f.port) || 22,
+        folder_id: f.folder_id ? Number(f.folder_id) : null,
+      };
       if (editing) await api.updateHost(host.id, payload);
       else await api.addHost(payload);
       onDone();
@@ -379,6 +662,13 @@ function HostForm({ host, onDone }) {
         value={f.password}
         onChange={set("password")}
       />
+      <select value={f.folder_id} onChange={set("folder_id")}>
+        <option value="">No folder</option>
+        {folders.map((fo) => (
+          <option key={fo.id} value={fo.id}>{fo.name}</option>
+        ))}
+      </select>
+      <input placeholder="Tags (comma separated)" value={f.tags} onChange={set("tags")} />
       {editing && host.has_password && (
         <label className="small muted checkline">
           <input
