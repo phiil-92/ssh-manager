@@ -38,4 +38,7 @@ if (!cols.some((c) => c.name === "tags")) {
 if (!cols.some((c) => c.name === "favorite")) {
   db.exec("ALTER TABLE hosts ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
 }
+if (!cols.some((c) => c.name === "last_connected_at")) {
+  db.exec("ALTER TABLE hosts ADD COLUMN last_connected_at TEXT");
+}
 module.exports = db;
