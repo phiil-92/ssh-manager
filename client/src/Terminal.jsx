@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-export default function SshTerminal() {
+export default function SshTerminal({ hostId }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -24,8 +24,8 @@ export default function SshTerminal() {
     fit.fit();
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws`);
-
+    //const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    const ws = new WebSocket(`${proto}://${location.host}/ws?hostId=${hostId}`);
     // SSH output → screen
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
@@ -62,7 +62,7 @@ export default function SshTerminal() {
     ro.observe(containerRef.current);
 
     return () => { ro.disconnect(); ws.close(); term.dispose(); };
-  }, []);
+  }, [hostId]);
 
   return <div ref={containerRef} className="terminal-container" />;
 }

@@ -58,3 +58,128 @@ html, body, #root {
   background: var(--bg);
   padding: 6px;
 }
+
+/* ---------- layout ---------- */
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.sidebar {
+  width: 260px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(143, 134, 212, 0.25);
+}
+
+/* ---------- host list ---------- */
+.host-list {
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.host {
+  position: relative;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(143, 134, 212, 0.12);
+}
+
+.host:hover { background: rgba(58, 51, 107, 0.35); }
+.host.active { background: var(--accent); }
+
+.host-name { font-weight: 600; font-size: 14px; }
+.host-meta { font-size: 12px; color: var(--accent-light); }
+.host.active .host-meta { color: rgba(255, 255, 255, 0.75); }
+
+.host-delete {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  font-size: 14px;
+}
+.host:hover .host-delete { opacity: 0.7; }
+.host-delete:hover { opacity: 1 !important; }
+
+/* ---------- forms, cards, buttons ---------- */
+.center-screen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 24px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card h2 { font-size: 18px; font-weight: 600; }
+
+input {
+  background: var(--bg);
+  border: 1px solid rgba(143, 134, 212, 0.4);
+  border-radius: 5px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+input:focus {
+  outline: none;
+  border-color: var(--accent-light);
+}
+
+.btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 8px 14px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:hover { filter: brightness(1.2); }
+.btn-small { padding: 3px 10px; font-size: 12px; }
+.btn-ghost { background: rgba(255, 255, 255, 0.12); margin-left: auto; }
+
+.add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(143, 134, 212, 0.25);
+}
+
+/* ---------- misc ---------- */
+.muted { color: rgba(228, 226, 240, 0.5); }
+.small { font-size: 12px; }
+.pad { padding: 12px; }
+.error { color: #e06c75; font-size: 12px; }
