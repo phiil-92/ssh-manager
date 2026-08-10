@@ -331,4 +331,14 @@ wss.on("connection", (ws, req) => {
   })();
 });
 
+// In production, serve the built React frontend
+if (process.env.NODE_ENV === "production") {
+  const path = require("path");
+  app.use(express.static(path.join(__dirname, "public")));
+  // For any non-API route, serve index.html (React handles routing client-side)
+  app.get("/{*path}", (req, res) => {
+    res.sendFile(path.join(__dirname, "public", "index.html"));
+  });
+}
+
 server.listen(3000, () => console.log("Backend running on http://localhost:3000"));
