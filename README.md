@@ -42,4 +42,4 @@ docker-compose.yml:
 
 Open the App on: http://server-ip:3000
 
-## This was made as a personal tool for me using claude. Expect bugs.
+### This was made as a tool for my personal use in my homelab and not with the goal of having it be used by a ton of people or attract any attention. It is here for those who might need a tool like this. 
