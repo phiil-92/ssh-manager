@@ -1,4 +1,3 @@
-ENTIRELY VIBE-CODED.
 Web-Based SSH Connection Manager meant for personal use.
 
 <img width="1920" height="921" alt="file2" src="https://github.com/user-attachments/assets/6afe2fa5-33fa-44ad-a5e8-1d191c61869b" />
@@ -43,4 +42,4 @@ docker-compose.yml:
 
 Open the App on: http://server-ip:3000
 
-Expect bugs.
+This was made as a personal tool for me using claude. Expect bugs.
