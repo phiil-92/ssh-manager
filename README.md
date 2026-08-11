@@ -42,4 +42,4 @@ docker-compose.yml:
 
 Open the App on: http://server-ip:3000
 
-This was made as a personal tool for me using claude. Expect bugs.
+## This was made as a personal tool for me using claude. Expect bugs.
