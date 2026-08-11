@@ -4,13 +4,26 @@ Web-Based SSH Connection Manager meant for personal use.
 <img width="1900" height="920" alt="file1" src="https://github.com/user-attachments/assets/d25a187b-184a-4893-ac50-dce6eedb0e95" />
 
 
-## Features so far
+## v0.7.0
+
+### Snippet Panel
+- Panel on the right side (toggle via "Snippets" button)
+- Add, edit, delete command snippets
+- Click snippet to run it
+
+### Encrypted Export/Import
+- Export connections, folders and snippets to a ".sshm" file
+- File is encrypted with AES256-GCM using your master password
+- Import on any instance using the master password the file was exported with
+
+### Feature list
 - AES256-GCM encrypted credential store
 - Tabs and split view
 - Folders, tags, favourites
+- Recent connections launcher
 - Snippet panel for shortcuts
 - Option to export/import saved connections encrypted as .sshm files
-- Server stats at the bottom of connected instance
+- Server stats at the bottom of connected instance (cpu, ram, disk, ping, session time, user)
 
 ## Install 
 Requires Docker
