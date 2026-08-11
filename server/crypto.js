@@ -73,7 +73,6 @@ function decrypt(payload) {
   return decryptWith(masterKey, payload);
 }
 
-// Verify old password, re-encrypt every credential under a new key
 async function changeMasterPassword(currentPassword, newPassword) {
   const row = db.prepare("SELECT value FROM meta WHERE key = 'verify_hash'").get();
   if (!row) throw new Error("Not set up");
@@ -85,24 +84,97 @@ async function changeMasterPassword(currentPassword, newPassword) {
     "base64"
   );
   const oldKey = await deriveKey(currentPassword, salt);
-
   const rows = db.prepare("SELECT id, enc_password FROM hosts WHERE enc_password IS NOT NULL").all();
   const decrypted = rows.map((r) => ({ id: r.id, pw: decryptWith(oldKey, r.enc_password) }));
 
-  await setup(newPassword); // new salt + hash, masterKey now = new key
+  await setup(newPassword);
 
   const upd = db.prepare("UPDATE hosts SET enc_password = ? WHERE id = ?");
   for (const d of decrypted) upd.run(encrypt(d.pw), d.id);
   return true;
 }
 
-// Nuclear option: all hosts + the vault itself
 function wipeAll() {
-  db.exec("DELETE FROM hosts; DELETE FROM meta;");
+  db.exec("DELETE FROM hosts; DELETE FROM meta; DELETE FROM folders; DELETE FROM snippets;");
   masterKey = null;
+}
+
+// ---------- Export: verify password, decrypt all, re-encrypt whole payload ----------
+async function exportData(masterPassword) {
+  if (!masterKey) throw new Error("Vault is locked");
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'verify_hash'").get();
+  if (!row) throw new Error("Not set up");
+  const ok = await argon2.verify(row.value, masterPassword);
+  if (!ok) return null; // caller treats null as wrong password
+
+  const folders = db.prepare("SELECT id, name FROM folders").all();
+  const snippets = db.prepare("SELECT id, name, command FROM snippets").all();
+  const hosts = db.prepare("SELECT * FROM hosts").all();
+
+  const hostsClean = hosts.map((h) => {
+    let password = null;
+    if (h.enc_password) {
+      try { password = decryptWith(masterKey, h.enc_password); } catch {}
+    }
+    const { enc_password, ...rest } = h;
+    return { ...rest, password };
+  });
+
+  const payload = JSON.stringify({
+    version: 1,
+    exported_at: new Date().toISOString(),
+    folders,
+    hosts: hostsClean,
+    snippets,
+  });
+
+  // Derive a fresh key from the master password + a new salt (independent of the vault salt)
+  const salt = crypto.randomBytes(16);
+  const exportKey = await deriveKey(masterPassword, salt);
+  const nonce = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", exportKey, nonce);
+  const ct = Buffer.concat([cipher.update(payload, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return JSON.stringify({
+    v: 1,
+    app: "ssh-manager",
+    salt: salt.toString("base64"),
+    nonce: nonce.toString("base64"),
+    tag: tag.toString("base64"),
+    data: ct.toString("base64"),
+  });
+}
+
+// ---------- Import: decrypt file, re-encrypt under current vault key ----------
+async function importData(fileContent, exportPassword) {
+  if (!masterKey) throw new Error("Vault is locked");
+
+  let file;
+  try { file = JSON.parse(fileContent); } catch { throw new Error("Invalid file format"); }
+  if (file.app !== "ssh-manager" || file.v !== 1) throw new Error("Not an SSH Manager export file");
+
+  const salt = Buffer.from(file.salt, "base64");
+  const exportKey = await deriveKey(exportPassword, salt);
+  const nonce = Buffer.from(file.nonce, "base64");
+  const ct = Buffer.from(file.data, "base64");
+  const tag = Buffer.from(file.tag, "base64");
+
+  const decipher = crypto.createDecipheriv("aes-256-gcm", exportKey, nonce);
+  decipher.setAuthTag(tag);
+
+  let plaintext;
+  try {
+    plaintext = Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
+  } catch {
+    throw new Error("Wrong password or corrupted file");
+  }
+
+  return JSON.parse(plaintext);
 }
 
 module.exports = {
   isSetUp, isUnlocked, setup, unlock, lock,
   encrypt, decrypt, changeMasterPassword, wipeAll,
+  exportData, importData,
 };

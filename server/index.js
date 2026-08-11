@@ -7,13 +7,13 @@ const vault = require("./crypto");
 const pkg = require("./package.json");
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "10mb" })); // import files can be a few MB
 const server = http.createServer(app);
 
 // ---------- Meta ----------
 app.get("/api/version", (req, res) => res.json({ version: pkg.version }));
 
-// ---------- Vault endpoints ----------
+// ---------- Vault ----------
 app.get("/api/vault/status", (req, res) => {
   res.json({ setUp: vault.isSetUp(), unlocked: vault.isUnlocked() });
 });
@@ -52,13 +52,75 @@ app.post("/api/vault/wipe", requireUnlocked, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Export / Import ----------
+app.post("/api/export", requireUnlocked, async (req, res) => {
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ error: "Password required" });
+  const result = await vault.exportData(password);
+  if (result === null) return res.status(401).json({ error: "Wrong password" });
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="ssh-manager-${Date.now()}.sshm"`);
+  res.send(result);
+});
+
+app.post("/api/import", requireUnlocked, async (req, res) => {
+  const { fileData, password } = req.body;
+  if (!fileData || !password) return res.status(400).json({ error: "File data and password required" });
+
+  let data;
+  try {
+    data = await vault.importData(fileData, password);
+  } catch (e) {
+    return res.status(401).json({ error: e.message });
+  }
+
+  // Map old folder IDs → new IDs
+  const folderIdMap = {};
+  for (const f of (data.folders || [])) {
+    const existing = db.prepare("SELECT id FROM folders WHERE name = ?").get(f.name);
+    if (existing) {
+      folderIdMap[f.id] = existing.id;
+    } else {
+      const info = db.prepare("INSERT INTO folders (name) VALUES (?)").run(f.name);
+      folderIdMap[f.id] = info.lastInsertRowid;
+    }
+  }
+
+  // Import hosts (skip exact duplicates: same hostname+port+username)
+  let imported = 0, skipped = 0;
+  for (const h of (data.hosts || [])) {
+    const exists = db.prepare(
+      "SELECT id FROM hosts WHERE hostname = ? AND port = ? AND username = ?"
+    ).get(h.hostname, h.port, h.username);
+    if (exists) { skipped++; continue; }
+    const enc = h.password ? vault.encrypt(h.password) : null;
+    const newFolderId = h.folder_id != null ? (folderIdMap[h.folder_id] ?? null) : null;
+    db.prepare(
+      "INSERT INTO hosts (name, hostname, port, username, enc_password, folder_id, tags, favorite) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(h.name, h.hostname, h.port, h.username || "", enc, newFolderId, h.tags || "", h.favorite || 0);
+    imported++;
+  }
+
+  // Import snippets (skip exact name+command duplicates)
+  let snippetsImported = 0;
+  for (const s of (data.snippets || [])) {
+    const exists = db.prepare("SELECT id FROM snippets WHERE name = ? AND command = ?").get(s.name, s.command);
+    if (!exists) {
+      db.prepare("INSERT INTO snippets (name, command) VALUES (?, ?)").run(s.name, s.command);
+      snippetsImported++;
+    }
+  }
+
+  res.json({ ok: true, imported, skipped, snippetsImported });
+});
+
 // ---------- Helpers ----------
 function requireUnlocked(req, res, next) {
   if (!vault.isUnlocked()) return res.status(403).json({ error: "Vault is locked" });
   next();
 }
 
-// ---------- Folder endpoints ----------
+// ---------- Folders ----------
 app.get("/api/folders", requireUnlocked, (req, res) => {
   res.json(db.prepare("SELECT * FROM folders ORDER BY name").all());
 });
@@ -83,38 +145,31 @@ app.delete("/api/folders/:id", requireUnlocked, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Host endpoints ----------
+// ---------- Hosts ----------
 app.get("/api/hosts", requireUnlocked, (req, res) => {
-  const hosts = db
-    .prepare(
-      "SELECT id, name, hostname, port, username, folder_id, tags, favorite, last_connected_at, (enc_password IS NOT NULL) AS has_password FROM hosts ORDER BY name"
-    )
-    .all();
+  const hosts = db.prepare(
+    "SELECT id, name, hostname, port, username, folder_id, tags, favorite, last_connected_at, (enc_password IS NOT NULL) AS has_password FROM hosts ORDER BY name"
+  ).all();
   res.json(hosts);
 });
 
 app.post("/api/hosts", requireUnlocked, (req, res) => {
-  const { name, hostname, port, username, password, folder_id, tags } = req.body;
-  if (!name || !hostname)
-    return res.status(400).json({ error: "name and hostname are required" });
+  const { name, hostname, port, username, password, folder_id, tags, favorite } = req.body;
+  if (!name || !hostname) return res.status(400).json({ error: "name and hostname are required" });
   const enc = password ? vault.encrypt(password) : null;
-  const info = db
-    .prepare(
-      "INSERT INTO hosts (name, hostname, port, username, enc_password, folder_id, tags) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    )
-    .run(name, hostname, port || 22, username || "", enc, folder_id || null, tags || "");
+  const info = db.prepare(
+    "INSERT INTO hosts (name, hostname, port, username, enc_password, folder_id, tags, favorite) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(name, hostname, port || 22, username || "", enc, folder_id || null, tags || "", favorite ? 1 : 0);
   res.json({ id: info.lastInsertRowid });
 });
 
 app.put("/api/hosts/:id", requireUnlocked, (req, res) => {
   const host = db.prepare("SELECT * FROM hosts WHERE id = ?").get(req.params.id);
   if (!host) return res.status(404).json({ error: "Host not found" });
-
   const { name, hostname, port, username, password, clearPassword, folder_id, tags, favorite } = req.body;
   let enc = host.enc_password;
   if (clearPassword) enc = null;
   else if (password) enc = vault.encrypt(password);
-
   db.prepare(
     "UPDATE hosts SET name = ?, hostname = ?, port = ?, username = ?, enc_password = ?, folder_id = ?, tags = ?, favorite = ? WHERE id = ?"
   ).run(
@@ -136,32 +191,46 @@ app.delete("/api/hosts/:id", requireUnlocked, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Snippets ----------
+app.get("/api/snippets", requireUnlocked, (req, res) => {
+  res.json(db.prepare("SELECT * FROM snippets ORDER BY name").all());
+});
+
+app.post("/api/snippets", requireUnlocked, (req, res) => {
+  const { name, command } = req.body;
+  if (!name || !command) return res.status(400).json({ error: "name and command are required" });
+  const info = db.prepare("INSERT INTO snippets (name, command) VALUES (?, ?)").run(name, command);
+  res.json({ id: info.lastInsertRowid });
+});
+
+app.put("/api/snippets/:id", requireUnlocked, (req, res) => {
+  const { name, command } = req.body;
+  db.prepare("UPDATE snippets SET name = ?, command = ? WHERE id = ?").run(name, command, req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete("/api/snippets/:id", requireUnlocked, (req, res) => {
+  db.prepare("DELETE FROM snippets WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ---------- Terminal WebSocket ----------
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, "http://localhost");
   const hostId = url.searchParams.get("hostId");
-
   const send = (data) => ws.send(JSON.stringify({ type: "data", data }));
 
-  if (!vault.isUnlocked()) {
-    send("\r\nVault is locked.\r\n");
-    return ws.close();
-  }
+  if (!vault.isUnlocked()) { send("\r\nVault is locked.\r\n"); return ws.close(); }
 
   const host = db.prepare("SELECT * FROM hosts WHERE id = ?").get(hostId);
-  if (!host) {
-    send("\r\nUnknown host.\r\n");
-    return ws.close();
-  }
+  if (!host) { send("\r\nUnknown host.\r\n"); return ws.close(); }
 
   const ssh = new Client();
   let stream = null;
   let lastSize = { cols: 80, rows: 24 };
   let promptHandler = null;
-
-  // ---- stats polling ----
   let statsTimer = null;
   let statsBusy = false;
   let prevCpu = null;
@@ -170,16 +239,11 @@ wss.on("connection", (ws, req) => {
     if (statsBusy || !stream) return;
     statsBusy = true;
     const t0 = Date.now();
-    const cmd =
-      "head -1 /proc/stat; free -b | grep -i '^mem'; df -B1 --output=used,size / | tail -1; whoami";
+    const cmd = "head -1 /proc/stat; free -b | grep -i '^mem'; df -B1 --output=used,size / | tail -1; whoami";
     ssh.exec(cmd, (err, s) => {
       if (err) { statsBusy = false; return; }
-      let out = "";
-      let ping = null;
-      s.on("data", (d) => {
-        if (ping === null) ping = Date.now() - t0;
-        out += d.toString("utf8");
-      });
+      let out = "", ping = null;
+      s.on("data", (d) => { if (ping === null) ping = Date.now() - t0; out += d.toString("utf8"); });
       s.stderr.on("data", () => {});
       s.on("close", () => {
         statsBusy = false;
@@ -190,32 +254,18 @@ wss.on("connection", (ws, req) => {
           const idle = cpuParts[3] + (cpuParts[4] || 0);
           let cpu = null;
           if (prevCpu) {
-            const dt = total - prevCpu.total;
-            const di = idle - prevCpu.idle;
+            const dt = total - prevCpu.total, di = idle - prevCpu.idle;
             if (dt > 0) cpu = Math.max(0, Math.min(100, 100 * (1 - di / dt)));
           }
           prevCpu = { total, idle };
-
           const mem = lines[1].trim().split(/\s+/);
-          const memTotal = Number(mem[1]);
-          const memAvail = Number(mem[6] ?? mem[3]);
-
+          const memTotal = Number(mem[1]), memAvail = Number(mem[6] ?? mem[3]);
           const dsk = lines[2].trim().split(/\s+/);
           const user = (lines[3] || "").trim();
-
           if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({
-              type: "stats",
-              ping,
-              cpu,
-              memUsed: memTotal - memAvail,
-              memTotal,
-              diskUsed: Number(dsk[0]),
-              diskTotal: Number(dsk[1]),
-              user,
-            }));
+            ws.send(JSON.stringify({ type: "stats", ping, cpu, memUsed: memTotal - memAvail, memTotal, diskUsed: Number(dsk[0]), diskTotal: Number(dsk[1]), user }));
           }
-        } catch { /* non-linux target or parse issue — just skip */ }
+        } catch {}
       });
     });
   }
@@ -223,7 +273,6 @@ wss.on("connection", (ws, req) => {
   ws.on("message", (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
-
     if (msg.type === "resize") {
       lastSize = { cols: msg.cols, rows: msg.rows };
       if (stream) stream.setWindow(msg.rows, msg.cols, 0, 0);
@@ -240,18 +289,8 @@ wss.on("connection", (ws, req) => {
       let buf = "";
       promptHandler = (data) => {
         for (const ch of data) {
-          if (ch === "\r") {
-            send("\r\n");
-            promptHandler = null;
-            return resolve(buf);
-          }
-          if (ch === "\x7f") {
-            if (buf.length > 0) {
-              buf = buf.slice(0, -1);
-              if (echo) send("\b \b");
-            }
-            continue;
-          }
+          if (ch === "\r") { send("\r\n"); promptHandler = null; return resolve(buf); }
+          if (ch === "\x7f") { if (buf.length > 0) { buf = buf.slice(0, -1); if (echo) send("\b \b"); } continue; }
           if (ch < " ") continue;
           buf += ch;
           if (echo) send(ch);
@@ -260,34 +299,25 @@ wss.on("connection", (ws, req) => {
     });
   }
 
-  ws.on("close", () => {
-    if (statsTimer) clearInterval(statsTimer);
-    ssh.end();
-  });
+  ws.on("close", () => { if (statsTimer) clearInterval(statsTimer); ssh.end(); });
 
   ssh.on("ready", () => {
-    ssh.shell(
-      { term: "xterm-256color", cols: lastSize.cols, rows: lastSize.rows },
-      (err, s) => {
-        if (err) {
-          send(`\r\nError: ${err.message}\r\n`);
-          return ws.close();
-        }
-        stream = s;
-        stream.setWindow(lastSize.rows, lastSize.cols, 0, 0);
-        ws.send(JSON.stringify({ type: "status", status: "connected" }));
-        db.prepare("UPDATE hosts SET last_connected_at = datetime('now') WHERE id = ?").run(host.id);
-	statsTimer = setInterval(pollStats, 5000);
-        pollStats();
-        stream.on("data", (chunk) => send(chunk.toString("utf8")));
-        stream.on("close", () => {
-          if (statsTimer) clearInterval(statsTimer);
-          ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
-          ssh.end();
-          ws.close();
-        });
-      }
-    );
+    ssh.shell({ term: "xterm-256color", cols: lastSize.cols, rows: lastSize.rows }, (err, s) => {
+      if (err) { send(`\r\nError: ${err.message}\r\n`); return ws.close(); }
+      stream = s;
+      stream.setWindow(lastSize.rows, lastSize.cols, 0, 0);
+      ws.send(JSON.stringify({ type: "status", status: "connected" }));
+      db.prepare("UPDATE hosts SET last_connected_at = datetime('now') WHERE id = ?").run(host.id);
+      statsTimer = setInterval(pollStats, 5000);
+      pollStats();
+      stream.on("data", (chunk) => send(chunk.toString("utf8")));
+      stream.on("close", () => {
+        if (statsTimer) clearInterval(statsTimer);
+        ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
+        ssh.end();
+        ws.close();
+      });
+    });
   });
 
   ssh.on("error", (err) => {
@@ -298,36 +328,22 @@ wss.on("connection", (ws, req) => {
 
   ssh.on("keyboard-interactive", async (name, instr, lang, prompts, finish) => {
     const answers = [];
-    for (const p of prompts) {
-      answers.push(await prompt(p.prompt, p.echo));
-    }
+    for (const p of prompts) answers.push(await prompt(p.prompt, p.echo));
     finish(answers);
   });
 
   (async () => {
     let username = host.username;
     if (!username) username = await prompt(`login as: `);
-
     let password;
     if (host.enc_password) {
-      try {
-        password = vault.decrypt(host.enc_password);
-      } catch {
-        send("\r\nFailed to decrypt credentials.\r\n");
-        return ws.close();
-      }
+      try { password = vault.decrypt(host.enc_password); }
+      catch { send("\r\nFailed to decrypt credentials.\r\n"); return ws.close(); }
     } else {
       password = await prompt(`${username}@${host.hostname}'s password: `, false);
     }
-
     send(`Connecting to ${host.hostname}:${host.port}...\r\n`);
-    ssh.connect({
-      host: host.hostname,
-      port: host.port,
-      username,
-      password,
-      tryKeyboard: true,
-    });
+    ssh.connect({ host: host.hostname, port: host.port, username, password, tryKeyboard: true });
   })();
 });
 
@@ -335,7 +351,6 @@ wss.on("connection", (ws, req) => {
 if (process.env.NODE_ENV === "production") {
   const path = require("path");
   app.use(express.static(path.join(__dirname, "public")));
-  // For any non-API route, serve index.html (React handles routing client-side)
   app.get("/{*path}", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "index.html"));
   });
