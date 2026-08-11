@@ -1,5 +1,5 @@
 ENTIRELY VIBE-CODED.
-SSH Connection Manager meant for personal use.
+Web-Based SSH Connection Manager meant for personal use.
 
 <img width="1900" height="920" alt="file1" src="https://github.com/user-attachments/assets/d25a187b-184a-4893-ac50-dce6eedb0e95" />
 
