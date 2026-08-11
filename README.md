@@ -43,3 +43,4 @@ docker-compose.yml:
 
 Open the App on: http://server-ip:3000
 
+Expect bugs.
