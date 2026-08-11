@@ -8,6 +8,8 @@ Web-Based SSH Connection Manager meant for personal use.
 - AES256-GCM encrypted credential store
 - Tabs and split view
 - Folders, tags, favourites
+- Snippet panel for shortcuts
+- Option to export/import saved connections encrypted as .sshm files
 - Server stats at the bottom of connected instance
 
 ## Install 
