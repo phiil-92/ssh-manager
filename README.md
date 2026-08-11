@@ -1,8 +1,7 @@
 ENTIRELY VIBE-CODED.
 Web-Based SSH Connection Manager meant for personal use.
 
-<img width="1900" height="920" alt="file1" src="https://github.com/user-attachments/assets/d25a187b-184a-4893-ac50-dce6eedb0e95" />
-
+<img width="1920" height="921" alt="file2" src="https://github.com/user-attachments/assets/6afe2fa5-33fa-44ad-a5e8-1d191c61869b" />
 
 ## v0.7.0
 
