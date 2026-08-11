@@ -739,7 +739,7 @@ function SettingsModal({ onClose, onRefresh, onWiped }) {
 
         <div className="divider" />
         <h3>Export</h3>
-        <p className="small muted">Download an encrypted backup of all connections, folders, and snippets. The file is encrypted with your master password — you need it to import.</p>
+        <p className="small muted">Download an encrypted backup of all connections, folders, and snippets. The file is encrypted with your master password - you need it to import.</p>
         <input type="password" placeholder="Confirm master password" value={exportPw} onChange={(e) => setExportPw(e.target.value)} />
         <button className="btn" onClick={handleExport}>Download .sshm file</button>
         {exportMsg && <p className="success">{exportMsg}</p>}
