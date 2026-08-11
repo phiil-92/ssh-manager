@@ -521,3 +521,91 @@ select:focus { outline: none; border-color: var(--accent-light); }
 [data-theme="light"] .recent-card:hover { background: rgba(58, 51, 107, 0.06); }
 .recent-name { font-size: 14px; font-weight: 600; }
 .recent-meta { font-size: 12px; }
+
+/* ---------- snippet panel ---------- */
+.snippet-panel {
+  width: 260px; /* fallback overwritten by inline style*/
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+}
+.snippet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(143, 134, 212, 0.25);
+}
+.snippet-list { list-style: none; overflow-y: auto; flex: 1; }
+.snippet-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(143, 134, 212, 0.12);
+  position: relative;
+}
+.snippet-item:hover { background: rgba(58, 51, 107, 0.25); }
+.snippet-name {
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--accent-light);
+}
+.snippet-name:hover { text-decoration: underline; }
+.snippet-item.disabled .snippet-name { cursor: not-allowed; opacity: 0.5; }
+.snippet-cmd {
+  font-size: 11px;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  color: rgba(228, 226, 240, 0.5);
+  margin-top: 2px;
+  word-break: break-all;
+}
+.snippet-actions { display: flex; gap: 4px; margin-top: 6px; opacity: 0; }
+.snippet-item:hover .snippet-actions { opacity: 1; }
+.snippet-actions button {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(143, 134, 212, 0.15);
+  border: 1px solid rgba(143, 134, 212, 0.35);
+  color: var(--text);
+  cursor: pointer;
+}
+.snippet-actions button:hover { background: var(--accent); }
+.snippet-form { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-bottom: 1px solid rgba(143, 134, 212, 0.2); }
+.snippet-form-btns { display: flex; gap: 6px; }
+.snippet-textarea {
+  background: var(--bg);
+  border: 1px solid rgba(143, 134, 212, 0.4);
+  border-radius: 5px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+.snippet-textarea:focus { outline: none; border-color: var(--accent-light); }
+
+/* ---------- active snippets button ---------- */
+.btn-active { background: rgba(255, 255, 255, 0.25) !important; }
+
+/* ---------- settings divider + file input ---------- */
+.divider { border: none; border-top: 1px solid rgba(143, 134, 212, 0.2); margin: 6px 0; }
+.file-label {
+  display: block;
+  padding: 7px 10px;
+  background: var(--bg);
+  border: 1px solid rgba(143, 134, 212, 0.4);
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+}
+.file-label input[type="file"] { display: none; }
+.file-label:hover { border-color: var(--accent-light); }
+
+/* ---------- light mode snippet ---------- */
+[data-theme="light"] .snippet-cmd { color: rgba(38, 35, 58, 0.5); }
+[data-theme="light"] .snippet-item:hover { background: rgba(58, 51, 107, 0.06); }

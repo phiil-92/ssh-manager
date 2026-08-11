@@ -18,7 +18,7 @@ const THEMES = {
   },
 };
 
-export default function SshTerminal({ hostId, visible, dark, onStatus, onStats }) {
+export default function SshTerminal({ hostId, visible, dark, onStatus, onStats, onReady }) {
   const containerRef = useRef(null);
   const termInstance = useRef(null);
   const resizeRef = useRef(() => {});
@@ -42,6 +42,13 @@ export default function SshTerminal({ hostId, visible, dark, onStatus, onStats }
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws?hostId=${hostId}`);
+
+    // Expose send function so the snippet panel can push commands into this terminal
+    onReady?.((text) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "data", data: text }));
+      }
+    });
 
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);

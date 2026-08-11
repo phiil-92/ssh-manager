@@ -26,4 +26,18 @@ export const api = {
   addFolder: (name) => req("/api/folders", { method: "POST", body: JSON.stringify({ name }) }),
   renameFolder: (id, name) => req(`/api/folders/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
   deleteFolder: (id) => req(`/api/folders/${id}`, { method: "DELETE" }),
+  listSnippets: () => req("/api/snippets"),
+  addSnippet: (s) => req("/api/snippets", { method: "POST", body: JSON.stringify(s) }),
+  updateSnippet: (id, s) => req(`/api/snippets/${id}`, { method: "PUT", body: JSON.stringify(s) }),
+  deleteSnippet: (id) => req(`/api/snippets/${id}`, { method: "DELETE" }),
+  exportData: async (password) => {
+    const res = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Export failed"); }
+    return res.blob();
+  },
+  importData: (fileData, password) => req("/api/import", { method: "POST", body: JSON.stringify({ fileData, password }) }),
 };
