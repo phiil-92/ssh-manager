@@ -37,7 +37,7 @@ docker-compose.yml:
         ports:
           - "3000:3000"
         volumes:
-          - ./data:/app/data
+          - ./data:/data
         environment:
           - NODE_ENV=production
 
