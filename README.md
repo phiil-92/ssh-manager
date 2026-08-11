@@ -42,4 +42,5 @@ docker-compose.yml:
 
 Open the App on: http://server-ip:3000
 
-### This was made as a tool for my personal use in my homelab and not with the goal of having it be used by a ton of people or attract any attention. It is here for those who might need a tool like this. 
+### I "made" this as a tool for myself to use in my homelab using claude. This is not intended as a official piece of software with the goal of doing big numbers since this is a Vibe-Coded tool.
+### I do not support Vibe-Coded software with the goal of making big numbers, being sold and so on.
