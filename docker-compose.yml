@@ -1,11 +1,11 @@
 services:
   ssh-manager:
-    image: phiil92921/ssh-manager:latest
+    build: .
     container_name: ssh-manager
     restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
-      - ./data:/app/data   
+      - ./data:/app/data
     environment:
       - NODE_ENV=production
