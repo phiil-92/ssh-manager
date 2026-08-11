@@ -605,7 +605,7 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version,
       </ul>
 
       <div className="sidebar-foot small">
-        <a className="repo-link muted" href="https://github.com/YOURUSERNAME/ssh-manager" target="_blank" rel="noopener noreferrer">v{version}</a>
+        <a className="repo-link muted" href="https://github.com/phiil-92/ssh-manager" target="_blank" rel="noopener noreferrer">v{version}</a>
       </div>
     </aside>
   );
