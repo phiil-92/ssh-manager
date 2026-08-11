@@ -14,7 +14,7 @@ docker-compose.yml:
 
     services:
       ssh-manager:
-        image: ghcr.io/phiil-92/ssh-manager:latest
+        image: ghcr.io/phiil92921/ssh-manager:latest
         container_name: ssh-manager
         restart: unless-stopped
         ports:
