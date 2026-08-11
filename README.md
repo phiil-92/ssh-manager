@@ -8,7 +8,6 @@ SSH Connection Manager meant for personal use.
 - AES256-GCM encrypted credential store
 - Tabs and split view
 - Folders, tags, favourites
-
 - Server stats at the bottom of connected instance
 
 ## Install 
