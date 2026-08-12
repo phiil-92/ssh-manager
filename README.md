@@ -25,7 +25,7 @@ Web-Based SSH Connection Manager meant for personal use.
 - Tab groups
 - Terminal Themes
 - Wake-On-Lan (Save the MAC-Address of the host you want to wake when connecting for it to work)
-- 2FA for unlocking the fault (Optional)
+- 2FA for unlocking the vault (Optional)
 
 ### Security
 - This is intended to be used in a trusted network / homelab. Do not expose to the internet or an untrusted network.(Atleast not without a reverse proxy)
