@@ -23,6 +23,9 @@ Web-Based SSH Connection Manager meant for personal use.
 - Option to export/import saved connections encrypted as .sshm files
 - Server stats at the bottom of connected instance (cpu, ram, disk, ping, session time, user)
 
+### Security
+-This is intended to be used in a trusted network / homelab. Do not expose to the internet or an untrusted network. If you must, put it behind a reverse proxy with HTTPS.
+
 ## Install 
 Requires Docker
 
