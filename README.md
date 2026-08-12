@@ -2,7 +2,7 @@ Web-Based SSH Connection Manager meant for personal use.
 
 <img width="1916" height="931" alt="file3" src="https://github.com/user-attachments/assets/6707a82e-8d16-4d1f-993e-b2fa66fe6be4" />
 
-## v0.7.0
+## v0.9.0
 
 ### Snippet Panel
 - Panel on the right side (toggle via "Snippets" button)
@@ -22,9 +22,15 @@ Web-Based SSH Connection Manager meant for personal use.
 - Snippet panel for shortcuts
 - Option to export/import saved connections encrypted as .sshm files
 - Server stats at the bottom of connected instance (cpu, ram, disk, ping, session time, user)
+- Tab groups
+- Terminal Themes
+- Wake-On-Lan (Save the MAC-Address of the host you want to wake when connecting for it to work)
+- 2FA for unlocking the fault (Optional)
 
 ### Security
--This is intended to be used in a trusted network / homelab. Do not expose to the internet or an untrusted network. If you must, put it behind a reverse proxy with HTTPS.
+- This is intended to be used in a trusted network / homelab. Do not expose to the internet or an untrusted network.(Atleast not without a reverse proxy)
+- Recommend putting it behind a reverse proxy with HTTPS. 
+
 
 ## Install 
 Requires Docker
