@@ -1,0 +1,11 @@
+services:
+  ssh-manager:
+    build: .
+    container_name: ssh-manager
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data  
+    environment:
+      - NODE_ENV=production
