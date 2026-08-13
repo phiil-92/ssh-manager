@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon }    from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
-import "@xterm/xterm/css/xterm.css";
 import { api } from "./api.js";
+import "@xterm/xterm/css/xterm.css";
 
 export default function SshTerminal({ hostId, visible, termTheme, onStatus, onStats, onReady, onOutput }) {
   const containerRef   = useRef(null);
@@ -44,32 +44,32 @@ export default function SshTerminal({ hostId, visible, termTheme, onStatus, onSt
 
     onReady?.((text) => {
       if (wsRef.current?.readyState === WebSocket.OPEN)
-        wsRef.current.send(JSON.stringify({ type:"data", data:text }));
+        wsRef.current.send(JSON.stringify({ type: "data", data: text }));
     });
 
     term.onData((data) => {
       if (wsRef.current?.readyState === WebSocket.OPEN)
-        wsRef.current.send(JSON.stringify({ type:"data", data }));
+        wsRef.current.send(JSON.stringify({ type: "data", data }));
     });
 
     term.attachCustomKeyEventHandler((e) => {
-      if (e.ctrlKey && e.shiftKey && e.code==="KeyC" && e.type==="keydown") {
+      if (e.ctrlKey && e.shiftKey && e.code === "KeyC" && e.type === "keydown") {
         const sel = term.getSelection(); if (sel) navigator.clipboard.writeText(sel); return false;
       }
-      if (e.ctrlKey && e.code==="KeyF" && e.type==="keydown") {
+      if (e.ctrlKey && e.code === "KeyF" && e.type === "keydown") {
         setSearchOpen((v) => { searchOpenRef.current = !v; return !v; }); return false;
       }
-      if (e.code==="Escape" && e.type==="keydown" && searchOpenRef.current) {
+      if (e.code === "Escape" && e.type === "keydown" && searchOpenRef.current) {
         setSearchOpen(false); setSearchQuery(""); searchOpenRef.current = false; return false;
       }
       return true;
     });
 
     const sendResize = () => {
-      if (!containerRef.current || containerRef.current.offsetParent===null) return;
+      if (!containerRef.current || containerRef.current.offsetParent === null) return;
       fit.fit();
       if (wsRef.current?.readyState === WebSocket.OPEN)
-        wsRef.current.send(JSON.stringify({ type:"resize", cols:term.cols, rows:term.rows }));
+        wsRef.current.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
     };
     resizeRef.current = sendResize;
 
@@ -77,18 +77,24 @@ export default function SshTerminal({ hostId, visible, termTheme, onStatus, onSt
     ro.observe(containerRef.current);
 
     function connect() {
-      const proto = location.protocol==="https:" ? "wss" : "ws";
-      const token = api.getSessionToken();
-      const ws = new WebSocket(`${proto}://${location.host}/ws?hostId=${hostId}&token=${token}`);
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws    = new WebSocket(`${proto}://${location.host}/ws?hostId=${hostId}`);
       wsRef.current = ws;
 
-      ws.onopen    = () => { reconAttempts.current = 0; sendResize(); };
+      ws.onopen = () => {
+        // Send token as first message — keeps it out of server logs
+        ws.send(JSON.stringify({ type: "auth", token: api.getSessionToken() }));
+        reconAttempts.current = 0;
+        sendResize();
+      };
+
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
-        if (msg.type==="data")   { term.write(msg.data); outputRef.current?.(msg.data); }
-        if (msg.type==="status") statusRef.current?.(msg.status);
-        if (msg.type==="stats")  statsRef .current?.(msg);
+        if (msg.type === "data")   { term.write(msg.data); outputRef.current?.(msg.data); }
+        if (msg.type === "status") statusRef.current?.(msg.status);
+        if (msg.type === "stats")  statsRef .current?.(msg);
       };
+
       ws.onclose = () => {
         statusRef.current?.("disconnected");
         if (!shouldRecon.current) return;
@@ -104,6 +110,7 @@ export default function SshTerminal({ hostId, visible, termTheme, onStatus, onSt
     }
 
     connect();
+
     return () => {
       shouldRecon.current = false;
       clearTimeout(reconTimer.current);
@@ -135,13 +142,13 @@ export default function SshTerminal({ hostId, visible, termTheme, onStatus, onSt
             autoFocus placeholder="Search…" value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); doSearch(e.target.value); }}
             onKeyDown={(e) => {
-              if (e.key==="Enter")  doSearch(searchQuery, !e.shiftKey);
-              if (e.key==="Escape") { setSearchOpen(false); setSearchQuery(""); searchOpenRef.current=false; }
+              if (e.key === "Enter")  doSearch(searchQuery, !e.shiftKey);
+              if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); searchOpenRef.current = false; }
             }}
           />
           <button title="Previous" onClick={() => doSearch(searchQuery, false)}>▲</button>
           <button title="Next"     onClick={() => doSearch(searchQuery, true)}>▼</button>
-          <button title="Close"    onClick={() => { setSearchOpen(false); setSearchQuery(""); searchOpenRef.current=false; }}>✕</button>
+          <button title="Close"    onClick={() => { setSearchOpen(false); setSearchQuery(""); searchOpenRef.current = false; }}>✕</button>
         </div>
       )}
       <div ref={containerRef} className="terminal-container" />
