@@ -1,6 +1,6 @@
 Web-Based SSH Connection Manager meant for personal use.
 
-
+![preview](ssh-manager/images/fil6.png)
 
 ## v0.9.1
 
