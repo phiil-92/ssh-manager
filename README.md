@@ -1,6 +1,6 @@
 Web-Based SSH Connection Manager meant for personal use.
 
-<img width="1894" height="919" alt="fil5" src="https://github.com/user-attachments/assets/9ad454b5-9786-474b-b500-13a7ca6a7351" />
+<img width="1898" height="926" alt="fil6" src="https://github.com/user-attachments/assets/da978638-7019-4044-bb06-0a23393aea80" />
 
 ## v0.9.1
 
