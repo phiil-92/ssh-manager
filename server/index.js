@@ -253,15 +253,53 @@ app.put("/api/hosts/:id", requireAccess, (req, res) => {
 
 app.delete("/api/hosts/:id", requireAccess, (req, res) => { db.prepare("DELETE FROM hosts WHERE id=?").run(req.params.id); res.json({ ok: true }); });
 
-// ---------- Snippets ----------
-app.get   ("/api/snippets",     requireAccess, (req, res) => res.json(db.prepare("SELECT * FROM snippets ORDER BY name").all()));
-app.post  ("/api/snippets",     requireAccess, (req, res) => {
-  const { name, command } = req.body;
-  if (!name || !command) return res.status(400).json({ error: "name and command are required" });
-  res.json({ id: db.prepare("INSERT INTO snippets (name,command) VALUES (?,?)").run(name, command).lastInsertRowid });
+// ---------- Snippet Folders ----------
+app.get   ("/api/snippet-folders",     requireAccess, (req, res) => res.json(db.prepare("SELECT * FROM snippet_folders ORDER BY name").all()));
+app.post  ("/api/snippet-folders",     requireAccess, (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: "name is required" });
+  res.json({ id: db.prepare("INSERT INTO snippet_folders (name) VALUES (?)").run(name).lastInsertRowid });
 });
-app.put   ("/api/snippets/:id", requireAccess, (req, res) => { db.prepare("UPDATE snippets SET name=?,command=? WHERE id=?").run(req.body.name, req.body.command, req.params.id); res.json({ ok: true }); });
-app.delete("/api/snippets/:id", requireAccess, (req, res) => { db.prepare("DELETE FROM snippets WHERE id=?").run(req.params.id); res.json({ ok: true }); });
+app.put   ("/api/snippet-folders/:id", requireAccess, (req, res) => {
+  db.prepare("UPDATE snippet_folders SET name=? WHERE id=?").run(req.body.name, req.params.id);
+  res.json({ ok: true });
+});
+app.delete("/api/snippet-folders/:id", requireAccess, (req, res) => {
+  db.prepare("UPDATE snippets SET folder_id=NULL WHERE folder_id=?").run(req.params.id);
+  db.prepare("DELETE FROM snippet_folders WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- Snippets ----------
+app.get("/api/snippets", requireAccess, (req, res) =>
+  res.json(db.prepare("SELECT * FROM snippets ORDER BY favorite DESC, name ASC").all())
+);
+
+app.post("/api/snippets", requireAccess, (req, res) => {
+  const { name, command, folder_id, favorite } = req.body;
+  if (!name || !command) return res.status(400).json({ error: "name and command are required" });
+  res.json({
+    id: db.prepare("INSERT INTO snippets (name,command,folder_id,favorite) VALUES (?,?,?,?)")
+      .run(name, command, folder_id || null, favorite ? 1 : 0).lastInsertRowid
+  });
+});
+
+app.put("/api/snippets/:id", requireAccess, (req, res) => {
+  const s = db.prepare("SELECT * FROM snippets WHERE id=?").get(req.params.id);
+  if (!s) return res.status(404).json({ error: "Snippet not found" });
+  const { name, command, folder_id, favorite } = req.body;
+  db.prepare("UPDATE snippets SET name=?,command=?,folder_id=?,favorite=? WHERE id=?")
+    .run(name ?? s.name, command ?? s.command,
+      folder_id === undefined ? s.folder_id : folder_id || null,
+      favorite === undefined ? s.favorite : favorite ? 1 : 0,
+      req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete("/api/snippets/:id", requireAccess, (req, res) => {
+  db.prepare("DELETE FROM snippets WHERE id=?").run(req.params.id);
+  res.json({ ok: true });
+});
 
 // ---------- WebSocket Terminal ----------
 const wss = new WebSocketServer({ server, path: "/ws" });

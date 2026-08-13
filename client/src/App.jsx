@@ -45,6 +45,7 @@ const TERMINAL_THEMES = {
 
 const DEFAULT_CUSTOM_THEME = { background:"#1a1a2e", foreground:"#eaeaea", cursor:"#ffffff", selectionBackground:"#444466" };
 const GROUP_COLORS = ["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#a855f7","#ec4899","#6b7280"];
+//const SNIPPET_NAME_STYLE = { color: "var(--accent-light)" };
 
 function buildDisplayItems(ordered, tabGroups, collapsedGroups) {
   const items = [], seen = new Set();
@@ -69,6 +70,7 @@ export default function App() {
   const [hosts,           setHosts]          = useState([]);
   const [folders,         setFolders]        = useState([]);
   const [snippets,        setSnippets]       = useState([]);
+  const [snippetFolders,  setSnippetFolders] = useState([]);
   const [sessions,        setSessions]       = useState([]);
   const [tabOrder,        setTabOrder]       = useState([]);
   const [activeId,        setActiveId]       = useState(null);
@@ -120,18 +122,10 @@ export default function App() {
   useEffect(() => {
     function handleVaultLocked() {
       if (isLoggingIn.current) return;
-      setSessions([]);
-      setTabOrder([]);
-      setActiveId(null);
-      setSplit(null);
-      setShowSettings(false);
-      setShowSnippets(false);
-      setHosts([]);
-      setFolders([]);
-      setSnippets([]);
-      setTabGroups([]);
-      setCollapsedGroups(new Set());
-      api.setVaultLockedSuppressed(false);
+      setSessions([]); setTabOrder([]); setActiveId(null); setSplit(null);
+      setShowSettings(false); setShowSnippets(false);
+      setHosts([]); setFolders([]); setSnippets([]); setSnippetFolders([]);
+      setTabGroups([]); setCollapsedGroups(new Set());
       setVault((v) => v ? { ...v, unlocked: false } : v);
       setNotification({ msg: "Session expired — please unlock again.", type: "error" });
       setTimeout(() => setNotification(null), 3000);
@@ -158,7 +152,7 @@ export default function App() {
   }
 
   async function refreshData()    { setHosts(await api.listHosts()); setFolders(await api.listFolders()); }
-  async function refreshSnippets(){ setSnippets(await api.listSnippets()); }
+  async function refreshSnippets(){ setSnippets(await api.listSnippets()); setSnippetFolders(await api.listSnippetFolders()); }
 
   function notify(msg, type="info") {
     setNotification({ msg, type });
@@ -203,6 +197,7 @@ export default function App() {
 
   async function handleLock() {
     await api.vaultLock();
+    api.setVaultLockedSuppressed(false);
     setSessions([]); setTabOrder([]); setActiveId(null); setSplit(null);
     setTabGroups([]); setCollapsedGroups(new Set());
     setRequires2fa(false); setPendingPassword("");
@@ -391,7 +386,13 @@ export default function App() {
             />
           </main>
           {showSnippets&&<div className="sb-resizer" onPointerDown={startSnResize}/>}
-          {showSnippets&&<SnippetPanel snippets={snippets} onChanged={refreshSnippets} onSend={sendSnippet} hasActive={activeId!=null} width={snWidth}/>}
+          {showSnippets&&(
+            <SnippetPanel
+              snippets={snippets} folders={snippetFolders}
+              onChanged={refreshSnippets} onSend={sendSnippet}
+              hasActive={activeId!=null} width={snWidth}
+            />
+          )}
         </div>
       )}
 
@@ -416,15 +417,15 @@ export default function App() {
           customTermTheme={customTermTheme}
           onThemeChange={(id)=>setTermThemeId(id)}
           onCustomColor={(k,v)=>setCustomTermTheme((p)=>({...p,[k]:v}))}
-          onClose={() => { api.setVaultLockedSuppressed(false); setShowSettings(false); }}
-          onRefresh={()=>{refreshData();refreshSnippets();}}
+          onClose={()=>{ api.setVaultLockedSuppressed(false); setShowSettings(false); }}
+          onRefresh={()=>{ refreshData(); refreshSnippets(); }}
           on2FAChange={(enabled)=>setTwoFAEnabled(enabled)}
           onWiped={()=>{
             setSessions([]); setTabOrder([]); setActiveId(null); setSplit(null);
             setTabGroups([]); setCollapsedGroups(new Set());
             setShowSettings(false); setShowSnippets(false);
             setVault({setUp:false,unlocked:false});
-            setHosts([]); setFolders([]); setSnippets([]);
+            setHosts([]); setFolders([]); setSnippets([]); setSnippetFolders([]);
           }}
         />
       )}
@@ -767,7 +768,7 @@ function HostForm({ host, folders, onDone }) {
         <option value="">No folder</option>
         {folders.map((fo)=><option key={fo.id} value={fo.id}>{fo.name}</option>)}
       </select>
-      <input placeholder="Tags (comma separated)"  value={f.tags}        onChange={set("tags")}/>
+      <input placeholder="Tags (comma separated)"  value={f.tags} onChange={set("tags")}/>
       <input placeholder="MAC address for Wake on LAN (e.g. AA:BB:CC:DD:EE:FF)" value={f.mac_address} onChange={set("mac_address")}/>
       <textarea className="notes-textarea" placeholder="Notes (services, anything useful)" value={f.notes} onChange={set("notes")} rows={3}/>
       <label className="small muted checkline"><input type="checkbox" checked={f.favorite} onChange={(e)=>setF({...f,favorite:e.target.checked})}/> Favourite</label>
@@ -777,49 +778,196 @@ function HostForm({ host, folders, onDone }) {
   );
 }
 
-function SnippetPanel({ snippets, onChanged, onSend, hasActive, width }) {
-  const [showForm, setShowForm] = useState(false);
-  const [editing,  setEditing]  = useState(null);
-  const [name,     setName]     = useState("");
-  const [command,  setCommand]  = useState("");
+function SnippetPanel({ snippets, folders, onChanged, onSend, hasActive, width }) {
+  const [showForm,     setShowForm]     = useState(false);
+  const [editing,      setEditing]      = useState(null);
+  const [name,         setName]         = useState("");
+  const [command,      setCommand]      = useState("");
+  const [folderId,     setFolderId]     = useState("");
+  const [favorite,     setFavorite]     = useState(false);
+  const [filter,       setFilter]       = useState("");
+  const [collapsed,    setCollapsed]    = useState(() => new Set());
+  const [dragSnippetId,setDragSnippetId]= useState(null);
+  const [dropTarget,   setDropTarget]   = useState(undefined);
 
-  function startAdd()  { setEditing(null); setName(""); setCommand(""); setShowForm(true); }
-  function startEdit(s){ setEditing(s); setName(s.name); setCommand(s.command); setShowForm(true); }
+  function startAdd() {
+    setEditing(null); setName(""); setCommand("");
+    setFolderId(""); setFavorite(false); setShowForm(true);
+  }
+  function startEdit(s) {
+    setEditing(s); setName(s.name); setCommand(s.command);
+    setFolderId(s.folder_id ? String(s.folder_id) : "");
+    setFavorite(!!s.favorite); setShowForm(true);
+  }
 
   async function save() {
-    if(!name.trim()||!command.trim()) return;
-    if(editing) await api.updateSnippet(editing.id,{name:name.trim(),command:command.trim()});
-    else        await api.addSnippet({name:name.trim(),command:command.trim()});
+    if (!name.trim() || !command.trim()) return;
+    const payload = { name: name.trim(), command: command.trim(), folder_id: folderId ? Number(folderId) : null, favorite };
+    if (editing) await api.updateSnippet(editing.id, payload);
+    else         await api.addSnippet(payload);
     setShowForm(false); onChanged();
   }
 
+  async function addFolder() {
+    const n = window.prompt("Folder name:");
+    if (n?.trim()) { await api.addSnippetFolder(n.trim()); onChanged(); }
+  }
+
+  function toggleCollapse(id) {
+    setCollapsed((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  async function dropOn(folderId) {
+    const id = dragSnippetId;
+    setDragSnippetId(null); setDropTarget(undefined);
+    if (id == null) return;
+    const snippet = snippets.find((s) => s.id === id);
+    if (!snippet || (snippet.folder_id ?? null) === folderId) return;
+    await api.updateSnippet(id, { folder_id: folderId });
+    onChanged();
+  }
+
+  const dropProps = (folderId) => ({
+    onDragOver:  (e) => { if (dragSnippetId == null) return; e.preventDefault(); setDropTarget(folderId); },
+    onDragLeave: () => setDropTarget(undefined),
+    onDrop:      (e) => { e.preventDefault(); dropOn(folderId); },
+  });
+
+  const q      = filter.trim().toLowerCase();
+  const match  = (s) => !q || s.name.toLowerCase().includes(q) || s.command.toLowerCase().includes(q);
+  const byFav  = (a, b) => (b.favorite - a.favorite) || a.name.localeCompare(b.name);
+  const ungrouped = snippets.filter((s) => !s.folder_id && match(s)).sort(byFav);
+
   return (
-    <aside className="snippet-panel" style={{width}}>
-      <div className="snippet-head"><span>Snippets</span><button className="btn btn-small" onClick={startAdd}>+ Add</button></div>
-      {showForm&&(
+    <aside className="snippet-panel" style={{ width }}>
+      <div
+        className={"snippet-head" + (dragSnippetId != null && dropTarget === null ? " drop-target" : "")}
+        {...dropProps(null)}
+      >
+        <span>{dragSnippetId != null ? "Drop here to unfile" : "Snippets"}</span>
+        <div className="snippet-head-actions">
+          <button className="btn btn-small" onClick={addFolder}>+ Folder</button>
+          <button className="btn btn-small" onClick={startAdd}>+ Add</button>
+        </div>
+      </div>
+
+      <div className="filter-wrap">
+        <input placeholder="Search snippets…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      </div>
+
+      {showForm && (
         <div className="snippet-form">
-          <input placeholder="Name" value={name} onChange={(e)=>setName(e.target.value)} autoFocus/>
-          <textarea className="snippet-textarea" placeholder="Command" value={command} onChange={(e)=>setCommand(e.target.value)} rows={3}/>
+          <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <textarea className="snippet-textarea" placeholder="Command" value={command} onChange={(e) => setCommand(e.target.value)} rows={3} />
+          <select value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+            <option value="">No folder</option>
+            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          <label className="small muted checkline">
+            <input type="checkbox" checked={favorite} onChange={(e) => setFavorite(e.target.checked)} />
+            Favourite
+          </label>
           <div className="snippet-form-btns">
             <button className="btn btn-small" onClick={save}>Save</button>
-            <button className="btn btn-small btn-ghost" onClick={()=>setShowForm(false)}>Cancel</button>
+            <button className="btn btn-small btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
           </div>
         </div>
       )}
+
       <ul className="snippet-list">
-        {snippets.map((s)=>(
-          <li key={s.id} className={"snippet-item"+(hasActive?"":" disabled")}>
-            <div className="snippet-name" onClick={()=>hasActive&&onSend(s.command+"\r")}>{s.name}</div>
-            <div className="snippet-cmd">{s.command}</div>
-            <div className="snippet-actions">
-              <button onClick={()=>startEdit(s)}>Edit</button>
-              <button onClick={async()=>{if(confirm(`Delete "${s.name}"?`)){await api.deleteSnippet(s.id);onChanged();}}}>Delete</button>
-            </div>
-          </li>
+        {ungrouped.map((s) => (
+          <SnippetRow key={s.id} snippet={s} hasActive={hasActive}
+            onSend={onSend} onEdit={startEdit} onChanged={onChanged}
+            onDragStart={setDragSnippetId}
+            onDragEnd={() => { setDragSnippetId(null); setDropTarget(undefined); }}
+          />
         ))}
-        {snippets.length===0&&!showForm&&<li className="muted small pad">No snippets yet.</li>}
+
+        {folders.map((f) => {
+          const inFolder   = snippets.filter((s) => s.folder_id === f.id && match(s)).sort(byFav);
+          const isCollapsed = collapsed.has(f.id);
+          return (
+            <li key={`sf${f.id}`} className="folder">
+              <div
+                className={"folder-head" + (dropTarget === f.id ? " drop-target" : "")}
+                onClick={() => toggleCollapse(f.id)}
+                {...dropProps(f.id)}
+              >
+                <span className="chev">{isCollapsed ? "▸" : "▾"}</span>
+                <span className="folder-name">{f.name}</span>
+                <span className="muted small">({inFolder.length})</span>
+                <div className="host-actions">
+                  <button onClick={async (e) => {
+                    e.stopPropagation();
+                    const n = window.prompt("Rename folder:", f.name);
+                    if (n?.trim()) { await api.renameSnippetFolder(f.id, n.trim()); onChanged(); }
+                  }}>Rename</button>
+                  <button onClick={async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Delete folder "${f.name}"? Snippets inside are kept.`)) {
+                      await api.deleteSnippetFolder(f.id); onChanged();
+                    }
+                  }}>Delete</button>
+                </div>
+              </div>
+              {!isCollapsed && (
+                <ul className="folder-hosts">
+                  {inFolder.map((s) => (
+                    <SnippetRow key={s.id} snippet={s} hasActive={hasActive}
+                      onSend={onSend} onEdit={startEdit} onChanged={onChanged}
+                      onDragStart={setDragSnippetId}
+                      onDragEnd={() => { setDragSnippetId(null); setDropTarget(undefined); }}
+                    />
+                  ))}
+                  {inFolder.length === 0 && <li className="muted small pad">Empty</li>}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+
+        {snippets.length === 0 && !showForm && (
+          <li className="muted small pad">No snippets yet.</li>
+        )}
       </ul>
     </aside>
+  );
+}
+
+function SnippetRow({ snippet: s, hasActive, onSend, onEdit, onChanged, onDragStart, onDragEnd }) {
+  return (
+    <li
+      className={"snippet-item" + (hasActive ? "" : " disabled")}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(s.id); }}
+      onDragEnd={onDragEnd}
+    >
+      <div className="snippet-name-row">
+        <span
+          className="snippet-name"
+          // please work holy shit
+          style={{ color: "#8f86d4", opacity: 1 }}
+          title={hasActive ? "Click to run" : "Open a session first"}
+          onClick={() => hasActive && onSend(s.command + "\r")}
+        >
+          {!!s.favorite && <span className="star-badge">★</span>}
+          {s.name}
+        </span>
+      </div>
+      <div className="snippet-cmd">{s.command}</div>
+      <div className="snippet-actions">
+        <button onClick={async (e) => {
+          e.stopPropagation();
+          await api.updateSnippet(s.id, { favorite: !s.favorite });
+          onChanged();
+        }}>{s.favorite ? "Unfav" : "Fav"}</button>
+        <button onClick={(e) => { e.stopPropagation(); onEdit(s); }}>Edit</button>
+        <button onClick={async (e) => {
+          e.stopPropagation();
+          if (confirm(`Delete "${s.name}"?`)) { await api.deleteSnippet(s.id); onChanged(); }
+        }}>Delete</button>
+      </div>
+    </li>
   );
 }
 
