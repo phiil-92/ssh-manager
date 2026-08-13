@@ -2,7 +2,7 @@ Web-Based SSH Connection Manager meant for personal use.
 
 <img width="1894" height="919" alt="fil5" src="https://github.com/user-attachments/assets/9ad454b5-9786-474b-b500-13a7ca6a7351" />
 
-## v0.9.0
+## v0.9.1
 
 ### Snippet Panel
 - Panel on the right side (toggle via "Snippets" button)
