@@ -105,4 +105,12 @@ export const api = {
   addSnippet:    (s)     => req("/api/snippets",       { method: "POST",   body: JSON.stringify(s) }),
   updateSnippet: (id, s) => req(`/api/snippets/${id}`, { method: "PUT",    body: JSON.stringify(s) }),
   deleteSnippet: (id)    => req(`/api/snippets/${id}`, { method: "DELETE" }),
+  
+  // Snippet folders
+  listSnippetFolders:  ()         => req("/api/snippet-folders"),
+  addSnippetFolder:    (name)     => req("/api/snippet-folders",       { method: "POST",   body: JSON.stringify({ name }) }),
+  renameSnippetFolder: (id, name) => req(`/api/snippet-folders/${id}`, { method: "PUT",    body: JSON.stringify({ name }) }),
+  deleteSnippetFolder: (id)       => req(`/api/snippet-folders/${id}`, { method: "DELETE" }),
 };
+
+
