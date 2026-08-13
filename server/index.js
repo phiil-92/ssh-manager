@@ -14,7 +14,7 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 const server = http.createServer(app);
 
-// ---------- Session token (RAM only, cleared on lock/restart) ----------
+// ---------- Session token ----------
 let sessionToken = null;
 
 // ---------- Security headers ----------
@@ -23,13 +23,19 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:;"
+  );
   next();
 });
 
-// ---------- Rate limiter for unlock attempts ----------
+// ---------- Trust proxy ----------
+app.set("trust proxy", false);
+
+// ---------- Rate limiter ----------
 const unlockLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10,                   // 10 attempts per window
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many unlock attempts. Try again in 15 minutes." },
@@ -63,10 +69,10 @@ function sendMagicPacket(mac) {
   });
 }
 
-// ---------- Meta (public) ----------
+// ---------- Meta ----------
 app.get("/api/version", (req, res) => res.json({ version: pkg.version }));
 
-// ---------- Vault (public endpoints — no token needed yet) ----------
+// ---------- Vault (public) ----------
 app.get("/api/vault/status", (req, res) => {
   res.json({ setUp: vault.isSetUp(), unlocked: vault.isUnlocked(), twoFAEnabled: vault.is2FAEnabled() });
 });
@@ -77,7 +83,6 @@ app.post("/api/vault/setup", async (req, res) => {
   if (!password || password.length < 8)
     return res.status(400).json({ error: "Password must be at least 8 characters" });
   await vault.setup(password);
-  // Generate session token on first setup (vault is now unlocked)
   sessionToken = crypto.randomBytes(32).toString("hex");
   res.json({ ok: true, token: sessionToken });
 });
@@ -85,19 +90,16 @@ app.post("/api/vault/setup", async (req, res) => {
 app.post("/api/vault/unlock", unlockLimiter, async (req, res) => {
   const { password, token } = req.body;
   const result = await vault.unlock(password || "", token || null);
-  if (result.requires2fa)                        return res.json({ requires2fa: true });
+  if (result.requires2fa)                           return res.json({ requires2fa: true });
   if (!result.ok && result.error === "wrong_token") return res.status(401).json({ error: "Invalid authenticator code" });
-  if (!result.ok)                                return res.status(401).json({ error: "Wrong password" });
-  // Issue a fresh session token on every successful unlock
+  if (!result.ok)                                   return res.status(401).json({ error: "Wrong password" });
   sessionToken = crypto.randomBytes(32).toString("hex");
   res.json({ ok: true, token: sessionToken });
 });
 
-// ---------- Vault (protected endpoints) ----------
+// ---------- Vault (protected) ----------
 app.post("/api/vault/lock", requireAccess, (req, res) => {
-  vault.lock();
-  sessionToken = null;
-  res.json({ ok: true });
+  vault.lock(); sessionToken = null; res.json({ ok: true });
 });
 
 app.post("/api/vault/change-password", requireAccess, async (req, res) => {
@@ -110,9 +112,7 @@ app.post("/api/vault/change-password", requireAccess, async (req, res) => {
 });
 
 app.post("/api/vault/wipe", requireAccess, (req, res) => {
-  vault.wipeAll();
-  sessionToken = null;
-  res.json({ ok: true });
+  vault.wipeAll(); sessionToken = null; res.json({ ok: true });
 });
 
 // ---------- 2FA ----------
@@ -171,8 +171,9 @@ app.post("/api/import", requireAccess, async (req, res) => {
     const enc   = h.password             ? vault.encrypt(h.password)             : null;
     const encK  = h.private_key          ? vault.encrypt(h.private_key)          : null;
     const encKp = h.key_passphrase_plain ? vault.encrypt(h.key_passphrase_plain) : null;
+    const port  = Math.max(1, Math.min(65535, parseInt(h.port) || 22));
     db.prepare("INSERT INTO hosts (name,hostname,port,username,enc_password,folder_id,tags,favorite,notes,auth_type,enc_private_key,key_passphrase,mac_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run(h.name, h.hostname, h.port, h.username||"", enc,
+      .run(h.name, h.hostname, port, h.username||"", enc,
         h.folder_id != null ? (folderIdMap[h.folder_id] ?? null) : null,
         h.tags||"", h.favorite||0, h.notes||"", h.auth_type||"password", encK, encKp, h.mac_address||"");
     imported++;
@@ -197,14 +198,14 @@ app.post("/api/wol/:id", requireAccess, async (req, res) => {
 });
 
 // ---------- Folders ----------
-app.get   ("/api/folders",        requireAccess, (req, res) => res.json(db.prepare("SELECT * FROM folders ORDER BY name").all()));
-app.post  ("/api/folders",        requireAccess, (req, res) => {
+app.get   ("/api/folders",     requireAccess, (req, res) => res.json(db.prepare("SELECT * FROM folders ORDER BY name").all()));
+app.post  ("/api/folders",     requireAccess, (req, res) => {
   const { name } = req.body;
   if (!name) return res.status(400).json({ error: "name is required" });
   res.json({ id: db.prepare("INSERT INTO folders (name) VALUES (?)").run(name).lastInsertRowid });
 });
-app.put   ("/api/folders/:id",    requireAccess, (req, res) => { db.prepare("UPDATE folders SET name=? WHERE id=?").run(req.body.name, req.params.id); res.json({ ok: true }); });
-app.delete("/api/folders/:id",    requireAccess, (req, res) => {
+app.put   ("/api/folders/:id", requireAccess, (req, res) => { db.prepare("UPDATE folders SET name=? WHERE id=?").run(req.body.name, req.params.id); res.json({ ok: true }); });
+app.delete("/api/folders/:id", requireAccess, (req, res) => {
   db.prepare("UPDATE hosts SET folder_id=NULL WHERE folder_id=?").run(req.params.id);
   db.prepare("DELETE FROM folders WHERE id=?").run(req.params.id);
   res.json({ ok: true });
@@ -223,11 +224,11 @@ app.post("/api/hosts", requireAccess, (req, res) => {
   const info = db.prepare(
     "INSERT INTO hosts (name,hostname,port,username,enc_password,folder_id,tags,favorite,notes,auth_type,enc_private_key,key_passphrase,mac_address) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ).run(name, hostname, port||22, username||"",
-    password     ? vault.encrypt(password)     : null,
-    folder_id    || null, tags||"", favorite?1:0, notes||"", auth_type||"password",
-    private_key  ? vault.encrypt(private_key)  : null,
-    key_passphrase ? vault.encrypt(key_passphrase) : null,
-    mac_address  || "");
+    password      ? vault.encrypt(password)      : null,
+    folder_id     || null, tags||"", favorite?1:0, notes||"", auth_type||"password",
+    private_key   ? vault.encrypt(private_key)   : null,
+    key_passphrase? vault.encrypt(key_passphrase): null,
+    mac_address   || "");
   res.json({ id: info.lastInsertRowid });
 });
 
@@ -235,8 +236,8 @@ app.put("/api/hosts/:id", requireAccess, (req, res) => {
   const host = db.prepare("SELECT * FROM hosts WHERE id=?").get(req.params.id);
   if (!host) return res.status(404).json({ error: "Host not found" });
   const { name, hostname, port, username, password, clearPassword, folder_id, tags, favorite, notes, auth_type, private_key, key_passphrase, clearKey, mac_address } = req.body;
-  let enc   = host.enc_password;    if (clearPassword) enc   = null; else if (password)     enc   = vault.encrypt(password);
-  let encK  = host.enc_private_key; if (clearKey)      encK  = null; else if (private_key)  encK  = vault.encrypt(private_key);
+  let enc   = host.enc_password;    if (clearPassword) enc   = null; else if (password)      enc   = vault.encrypt(password);
+  let encK  = host.enc_private_key; if (clearKey)      encK  = null; else if (private_key)   encK  = vault.encrypt(private_key);
   let encKp = host.key_passphrase;  if (key_passphrase !== undefined) encKp = key_passphrase ? vault.encrypt(key_passphrase) : null;
   db.prepare(
     "UPDATE hosts SET name=?,hostname=?,port=?,username=?,enc_password=?,folder_id=?,tags=?,favorite=?,notes=?,auth_type=?,enc_private_key=?,key_passphrase=?,mac_address=? WHERE id=?"
@@ -253,140 +254,149 @@ app.put("/api/hosts/:id", requireAccess, (req, res) => {
 app.delete("/api/hosts/:id", requireAccess, (req, res) => { db.prepare("DELETE FROM hosts WHERE id=?").run(req.params.id); res.json({ ok: true }); });
 
 // ---------- Snippets ----------
-app.get   ("/api/snippets",        requireAccess, (req, res) => res.json(db.prepare("SELECT * FROM snippets ORDER BY name").all()));
-app.post  ("/api/snippets",        requireAccess, (req, res) => {
+app.get   ("/api/snippets",     requireAccess, (req, res) => res.json(db.prepare("SELECT * FROM snippets ORDER BY name").all()));
+app.post  ("/api/snippets",     requireAccess, (req, res) => {
   const { name, command } = req.body;
   if (!name || !command) return res.status(400).json({ error: "name and command are required" });
   res.json({ id: db.prepare("INSERT INTO snippets (name,command) VALUES (?,?)").run(name, command).lastInsertRowid });
 });
-app.put   ("/api/snippets/:id",    requireAccess, (req, res) => { db.prepare("UPDATE snippets SET name=?,command=? WHERE id=?").run(req.body.name, req.body.command, req.params.id); res.json({ ok: true }); });
-app.delete("/api/snippets/:id",    requireAccess, (req, res) => { db.prepare("DELETE FROM snippets WHERE id=?").run(req.params.id); res.json({ ok: true }); });
+app.put   ("/api/snippets/:id", requireAccess, (req, res) => { db.prepare("UPDATE snippets SET name=?,command=? WHERE id=?").run(req.body.name, req.body.command, req.params.id); res.json({ ok: true }); });
+app.delete("/api/snippets/:id", requireAccess, (req, res) => { db.prepare("DELETE FROM snippets WHERE id=?").run(req.params.id); res.json({ ok: true }); });
 
 // ---------- WebSocket Terminal ----------
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 wss.on("connection", (ws, req) => {
-  const url     = new URL(req.url, "http://localhost");
-  const hostId  = url.searchParams.get("hostId");
-  const wsToken = url.searchParams.get("token");
-  const send    = (data) => ws.send(JSON.stringify({ type: "data", data }));
+  const url    = new URL(req.url, "http://localhost");
+  const hostId = url.searchParams.get("hostId");
+  const send   = (data) => ws.send(JSON.stringify({ type: "data", data }));
 
-  // Auth check — same session token the API uses
-  if (!sessionToken || wsToken !== sessionToken) {
-    send("\r\nUnauthorized.\r\n"); return ws.close();
-  }
-  if (!vault.isUnlocked()) { send("\r\nVault is locked.\r\n"); return ws.close(); }
+  // Auth via first message — keeps token out of server logs
+  ws.once("message", (authRaw) => {
+    let authMsg;
+    try { authMsg = JSON.parse(authRaw); } catch { send("\r\nBad auth.\r\n"); return ws.close(); }
+    if (authMsg.type !== "auth" || !sessionToken || authMsg.token !== sessionToken) {
+      send("\r\nUnauthorized.\r\n"); return ws.close();
+    }
+    if (!vault.isUnlocked()) { send("\r\nVault is locked.\r\n"); return ws.close(); }
 
-  const host = db.prepare("SELECT * FROM hosts WHERE id=?").get(hostId);
-  if (!host) { send("\r\nUnknown host.\r\n"); return ws.close(); }
+    const host = db.prepare("SELECT * FROM hosts WHERE id=?").get(hostId);
+    if (!host) { send("\r\nUnknown host.\r\n"); return ws.close(); }
 
-  const ssh = new Client();
-  let stream = null, lastSize = { cols: 80, rows: 24 }, promptHandler = null;
-  let statsTimer = null, statsBusy = false, prevCpu = null;
+    const ssh = new Client();
+    let stream = null, lastSize = { cols: 80, rows: 24 }, promptHandler = null;
+    let statsTimer = null, statsBusy = false, prevCpu = null;
 
-  function pollStats() {
-    if (statsBusy || !stream) return;
-    statsBusy = true;
-    const t0 = Date.now();
-    ssh.exec("head -1 /proc/stat; free -b | grep -i '^mem'; df -B1 --output=used,size / | tail -1; whoami", (err, s) => {
-      if (err) { statsBusy = false; return; }
-      let out = "", ping = null;
-      s.on("data", (d) => { if (ping === null) ping = Date.now() - t0; out += d.toString("utf8"); });
-      s.stderr.on("data", () => {});
-      s.on("close", () => {
-        statsBusy = false;
-        try {
-          const lines    = out.trim().split("\n");
-          const cpuParts = lines[0].trim().split(/\s+/).slice(1).map(Number);
-          const total    = cpuParts.reduce((a, b) => a + b, 0), idle = cpuParts[3] + (cpuParts[4] || 0);
-          let cpu = null;
-          if (prevCpu) { const dt = total-prevCpu.total, di = idle-prevCpu.idle; if (dt > 0) cpu = Math.max(0, Math.min(100, 100*(1-di/dt))); }
-          prevCpu = { total, idle };
-          const mem  = lines[1].trim().split(/\s+/);
-          const dsk  = lines[2].trim().split(/\s+/);
-          const user = (lines[3] || "").trim();
-          if (ws.readyState === ws.OPEN)
-            ws.send(JSON.stringify({ type:"stats", ping, cpu,
-              memUsed: Number(mem[1]) - Number(mem[6] ?? mem[3]),
-              memTotal: Number(mem[1]),
-              diskUsed: Number(dsk[0]), diskTotal: Number(dsk[1]), user }));
-        } catch {}
+    function pollStats() {
+      if (statsBusy || !stream) return;
+      statsBusy = true;
+      const t0 = Date.now();
+      ssh.exec("head -1 /proc/stat; free -b | grep -i '^mem'; df -B1 --output=used,size / | tail -1; whoami", (err, s) => {
+        if (err) { statsBusy = false; return; }
+        let out = "", ping = null;
+        s.on("data", (d) => { if (ping === null) ping = Date.now() - t0; out += d.toString("utf8"); });
+        s.stderr.on("data", () => {});
+        s.on("close", () => {
+          statsBusy = false;
+          try {
+            const lines    = out.trim().split("\n");
+            const cpuParts = lines[0].trim().split(/\s+/).slice(1).map(Number);
+            const total    = cpuParts.reduce((a, b) => a + b, 0), idle = cpuParts[3] + (cpuParts[4] || 0);
+            let cpu = null;
+            if (prevCpu) { const dt=total-prevCpu.total, di=idle-prevCpu.idle; if(dt>0) cpu=Math.max(0,Math.min(100,100*(1-di/dt))); }
+            prevCpu = { total, idle };
+            const mem  = lines[1].trim().split(/\s+/);
+            const dsk  = lines[2].trim().split(/\s+/);
+            const user = (lines[3] || "").trim();
+            if (ws.readyState === ws.OPEN)
+              ws.send(JSON.stringify({ type:"stats", ping, cpu,
+                memUsed:  Number(mem[1]) - Number(mem[6] ?? mem[3]),
+                memTotal: Number(mem[1]),
+                diskUsed: Number(dsk[0]), diskTotal: Number(dsk[1]), user }));
+          } catch {}
+        });
       });
-    });
-  }
-
-  ws.on("message", (raw) => {
-    let msg; try { msg = JSON.parse(raw); } catch { return; }
-    if (msg.type === "resize") { lastSize = { cols: msg.cols, rows: msg.rows }; if (stream) stream.setWindow(msg.rows, msg.cols, 0, 0); }
-    if (msg.type === "data")   { if (promptHandler) promptHandler(msg.data); else if (stream) stream.write(msg.data); }
-  });
-
-  function prompt(text, echo = true) {
-    return new Promise((resolve) => {
-      send(text); let buf = "";
-      promptHandler = (data) => {
-        for (const ch of data) {
-          if (ch === "\r") { send("\r\n"); promptHandler = null; return resolve(buf); }
-          if (ch === "\x7f") { if (buf.length > 0) { buf = buf.slice(0, -1); if (echo) send("\b \b"); } continue; }
-          if (ch < " ") continue;
-          buf += ch; if (echo) send(ch);
-        }
-      };
-    });
-  }
-
-  ws.on("close", () => { if (statsTimer) clearInterval(statsTimer); ssh.end(); });
-
-  ssh.on("ready", () => {
-    ssh.shell({ term: "xterm-256color", cols: lastSize.cols, rows: lastSize.rows }, (err, s) => {
-      if (err) { send(`\r\nError: ${err.message}\r\n`); return ws.close(); }
-      stream = s;
-      stream.setWindow(lastSize.rows, lastSize.cols, 0, 0);
-      ws.send(JSON.stringify({ type: "status", status: "connected" }));
-      db.prepare("UPDATE hosts SET last_connected_at=datetime('now') WHERE id=?").run(host.id);
-      statsTimer = setInterval(pollStats, 5000);
-      pollStats();
-      stream.on("data",  (chunk) => send(chunk.toString("utf8")));
-      stream.on("close", () => {
-        if (statsTimer) clearInterval(statsTimer);
-        ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
-        ssh.end(); ws.close();
-      });
-    });
-  });
-
-  ssh.on("error", (err) => {
-    send(`\r\nSSH error: ${err.message}\r\n`);
-    ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
-    ws.close();
-  });
-
-  ssh.on("keyboard-interactive", async (name, instr, lang, prompts, finish) => {
-    const answers = [];
-    for (const p of prompts) answers.push(await prompt(p.prompt, p.echo));
-    finish(answers);
-  });
-
-  (async () => {
-    let username = host.username;
-    if (!username) username = await prompt("login as: ");
-    send(`Connecting to ${host.hostname}:${host.port}...\r\n`);
-
-    const opts = { host: host.hostname, port: host.port, username, tryKeyboard: true };
-
-    if (host.auth_type === "key") {
-      if (!host.enc_private_key) { send("\r\nNo private key stored.\r\n"); return ws.close(); }
-      try { opts.privateKey = vault.decrypt(host.enc_private_key); } catch { send("\r\nFailed to decrypt key.\r\n"); return ws.close(); }
-      if (host.key_passphrase) { try { opts.passphrase = vault.decrypt(host.key_passphrase); } catch {} }
-      else { const pp = await prompt("Key passphrase (Enter if none): ", false); if (pp) opts.passphrase = pp; }
-    } else {
-      if (host.enc_password) { try { opts.password = vault.decrypt(host.enc_password); } catch { send("\r\nFailed to decrypt password.\r\n"); return ws.close(); } }
-      else opts.password = await prompt(`${username}@${host.hostname}'s password: `, false);
     }
 
-    ssh.connect(opts);
-  })();
-});
+    ws.on("message", (raw) => {
+      let msg; try { msg = JSON.parse(raw); } catch { return; }
+      if (msg.type === "resize") {
+        const cols = Math.max(1, Math.min(500, parseInt(msg.cols) || 80));
+        const rows = Math.max(1, Math.min(200, parseInt(msg.rows) || 24));
+        lastSize = { cols, rows };
+        if (stream) stream.setWindow(rows, cols, 0, 0);
+      }
+      if (msg.type === "data") { if (promptHandler) promptHandler(msg.data); else if (stream) stream.write(msg.data); }
+    });
+
+    function prompt(text, echo = true) {
+      return new Promise((resolve) => {
+        send(text); let buf = "";
+        promptHandler = (data) => {
+          for (const ch of data) {
+            if (ch === "\r") { send("\r\n"); promptHandler = null; return resolve(buf); }
+            if (ch === "\x7f") { if (buf.length > 0) { buf = buf.slice(0, -1); if (echo) send("\b \b"); } continue; }
+            if (ch < " ") continue;
+            buf += ch; if (echo) send(ch);
+          }
+        };
+      });
+    }
+
+    ws.on("close", () => { if (statsTimer) clearInterval(statsTimer); ssh.end(); });
+
+    ssh.on("ready", () => {
+      ssh.shell({ term: "xterm-256color", cols: lastSize.cols, rows: lastSize.rows }, (err, s) => {
+        if (err) { send(`\r\nError: ${err.message}\r\n`); return ws.close(); }
+        stream = s;
+        stream.setWindow(lastSize.rows, lastSize.cols, 0, 0);
+        ws.send(JSON.stringify({ type: "status", status: "connected" }));
+        db.prepare("UPDATE hosts SET last_connected_at=datetime('now') WHERE id=?").run(host.id);
+        statsTimer = setInterval(pollStats, 5000);
+        pollStats();
+        stream.on("data",  (chunk) => send(chunk.toString("utf8")));
+        stream.on("close", () => {
+          if (statsTimer) clearInterval(statsTimer);
+          ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
+          ssh.end(); ws.close();
+        });
+      });
+    });
+
+    ssh.on("error", (err) => {
+      send(`\r\nSSH error: ${err.message}\r\n`);
+      ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
+      ws.close();
+    });
+
+    ssh.on("keyboard-interactive", async (name, instr, lang, prompts, finish) => {
+      const answers = [];
+      for (const p of prompts) answers.push(await prompt(p.prompt, p.echo));
+      finish(answers);
+    });
+
+    (async () => {
+      let username = host.username;
+      if (!username) username = await prompt("login as: ");
+      send(`Connecting to ${host.hostname}:${host.port}...\r\n`);
+
+      const opts = { host: host.hostname, port: host.port, username, tryKeyboard: true };
+
+      if (host.auth_type === "key") {
+        if (!host.enc_private_key) { send("\r\nNo private key stored.\r\n"); return ws.close(); }
+        try { opts.privateKey = vault.decrypt(host.enc_private_key); } catch { send("\r\nFailed to decrypt key.\r\n"); return ws.close(); }
+        if (host.key_passphrase) { try { opts.passphrase = vault.decrypt(host.key_passphrase); } catch {} }
+        else { const pp = await prompt("Key passphrase (Enter if none): ", false); if (pp) opts.passphrase = pp; }
+      } else {
+        if (host.enc_password) { try { opts.password = vault.decrypt(host.enc_password); } catch { send("\r\nFailed to decrypt password.\r\n"); return ws.close(); } }
+        else opts.password = await prompt(`${username}@${host.hostname}'s password: `, false);
+      }
+
+      ssh.connect(opts);
+    })();
+
+  }); // closes ws.once("message")
+}); // closes wss.on("connection")
 
 if (process.env.NODE_ENV === "production") {
   const path = require("path");
