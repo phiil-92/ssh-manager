@@ -2,7 +2,7 @@ Web-Based SSH Connection Manager meant for personal use.
 
 ![preview](https://i.ibb.co/4Z7ZkZ44/fil6.png)
 
-## v0.9.1
+## v0.9.2
 
 ### Snippet Panel
 - Panel on the right side (toggle via "Snippets" button)
@@ -26,6 +26,7 @@ Web-Based SSH Connection Manager meant for personal use.
 - Terminal Themes
 - Wake-On-Lan (Save the MAC-Address of the host you want to wake when connecting for it to work)
 - 2FA for unlocking the vault (Optional)
+- Option to log terminal inputs and download them at any point
 
 ### Security
 - This is intended to be used in a trusted network / homelab. Do not expose to the internet or an untrusted network.(Atleast not without a reverse proxy, but honestly just don't...)
