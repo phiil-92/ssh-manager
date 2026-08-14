@@ -4,16 +4,6 @@ Web-Based SSH Connection Manager meant for personal use.
 
 ## v0.9.2
 
-### Snippet Panel
-- Panel on the right side (toggle via "Snippets" button)
-- Add, edit, delete command snippets
-- Click snippet to run it
-
-### Encrypted Export/Import
-- Export connections, folders and snippets to a ".sshm" file
-- File is encrypted with AES256-GCM using your master password
-- Import on any instance using the master password the file was exported with
-
 ### Feature list
 - Credential store
 - Tabs and split view
@@ -26,6 +16,16 @@ Web-Based SSH Connection Manager meant for personal use.
 - Terminal Themes
 - Wake-On-Lan (Save the MAC-Address of the host you want to wake when connecting for it to work)
 - Option to log terminal inputs and download them at any point
+
+### Snippet Panel
+- Panel on the right side (toggle via "Snippets" button)
+- Add, edit, delete command snippets
+- Click snippet to run it
+
+### Encrypted Export/Import
+- Export connections, folders and snippets to a ".sshm" file
+- File is encrypted with AES256-GCM using your master password
+- Import on any instance using the master password the file was exported with
 
 ### Security
 - This is intended to be used in a trusted network / homelab. Do not expose to the internet or an untrusted network.(Atleast not without a reverse proxy, but honestly just don't...)
