@@ -15,7 +15,7 @@ Web-Based SSH Connection Manager meant for personal use.
 - Import on any instance using the master password the file was exported with
 
 ### Feature list
-- AES256-GCM encrypted credential store
+- Credential store
 - Tabs and split view
 - Folders, tags, favourites
 - Recent connections launcher
@@ -25,12 +25,13 @@ Web-Based SSH Connection Manager meant for personal use.
 - Tab groups
 - Terminal Themes
 - Wake-On-Lan (Save the MAC-Address of the host you want to wake when connecting for it to work)
-- 2FA for unlocking the vault (Optional)
 - Option to log terminal inputs and download them at any point
 
 ### Security
 - This is intended to be used in a trusted network / homelab. Do not expose to the internet or an untrusted network.(Atleast not without a reverse proxy, but honestly just don't...)
-- Recommend putting it behind a reverse proxy with HTTPS. 
+- Recommend putting it behind a reverse proxy with HTTPS.
+- 2FA
+- Credential store AES256-GCM encrypted
 
 
 ## Install 
