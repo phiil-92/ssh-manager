@@ -1,4 +1,4 @@
-### Web-Based SSH Connection Manager meant for personal use.
+### Web-Based SSH Connection Manager
 
 ![preview](https://i.ibb.co/LzLy3GYc/fil22.png)
 
