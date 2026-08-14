@@ -53,4 +53,5 @@ docker-compose.yml:
 
 Open the App on: http://server-ip:3000
 
-### I made this as a tool for myself to use in my homelab using claude, use at your own discretion.
+> [!NOTE]
+> I made this as a tool for myself to use in my homelab using claude, use at your own discretion.
