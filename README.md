@@ -33,8 +33,9 @@ Web-Based SSH Connection Manager meant for personal use.
 - 2FA
 - Credential store AES256-GCM encrypted
 
+##
 
-## Install 
+### Install 
 Requires Docker
 
 docker-compose.yml:
