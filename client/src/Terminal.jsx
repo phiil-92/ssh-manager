@@ -28,9 +28,12 @@ export default function SshTerminal({ hostId, visible, termTheme, onStatus, onSt
 
   useEffect(() => {
     const term = new Terminal({
-      cursorBlink: true, fontSize: 14,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      fontSize: 14,
       fontFamily: '"Cascadia Mono","Consolas","DejaVu Sans Mono",monospace',
       scrollback: 5000,
+      lineHeight: 1.2,
       theme: termTheme,
     });
     termRef.current = term;
