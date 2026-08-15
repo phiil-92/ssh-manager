@@ -2,6 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import SshTerminal from "./Terminal.jsx";
 import { api } from "./api.js";
 
+// ---------- Color schemes (global UI theme) ----------
+const COLOR_SCHEMES = {
+  purple: { name: "Purple",     accent: "#3A336B", accentLight: "#8f86d4", tabBase: "#2B2652" },
+  blue:   { name: "Ocean Blue", accent: "#1a3a5c", accentLight: "#5b9bd5", tabBase: "#152d47" },
+  green:  { name: "Forest",     accent: "#1a3a28", accentLight: "#5bc48d", tabBase: "#142d1f" },
+  red:    { name: "Ruby",       accent: "#5c1a24", accentLight: "#d55b6b", tabBase: "#471519" },
+  orange: { name: "Sunset",     accent: "#5c3a1a", accentLight: "#d5955b", tabBase: "#472e14" },
+  teal:   { name: "Teal",       accent: "#1a3a3a", accentLight: "#5bc4c4", tabBase: "#142d2d" },
+  custom: { name: "Custom",     accent: "#3A336B", accentLight: "#8f86d4", tabBase: "#2B2652" },
+};
+
+// ---------- Terminal theme presets ----------
 const TERMINAL_THEMES = {
   dark: {
     name: "SSH Manager Dark",
@@ -43,9 +55,9 @@ const TERMINAL_THEMES = {
   },
 };
 
-const DEFAULT_CUSTOM_THEME = { background:"#1a1a2e", foreground:"#eaeaea", cursor:"#ffffff", selectionBackground:"#444466" };
+const DEFAULT_CUSTOM_THEME  = { background:"#1a1a2e", foreground:"#eaeaea", cursor:"#ffffff", selectionBackground:"#444466" };
+const DEFAULT_CUSTOM_SCHEME = { accent:"#3A336B", accentLight:"#8f86d4", tabBase:"#2B2652" };
 const GROUP_COLORS = ["#ef4444","#f97316","#eab308","#22c55e","#3b82f6","#a855f7","#ec4899","#6b7280"];
-//const SNIPPET_NAME_STYLE = { color: "var(--accent-light)" };
 
 function buildDisplayItems(ordered, tabGroups, collapsedGroups) {
   const items = [], seen = new Set();
@@ -67,6 +79,7 @@ function buildDisplayItems(ordered, tabGroups, collapsedGroups) {
 
 export default function App() {
   const [vault,           setVault]          = useState(null);
+  const [ssoStatus,       setSsoStatus]      = useState(null);
   const [hosts,           setHosts]          = useState([]);
   const [folders,         setFolders]        = useState([]);
   const [snippets,        setSnippets]       = useState([]);
@@ -84,6 +97,8 @@ export default function App() {
   const [showSnippets,    setShowSnippets]   = useState(false);
   const [showSettings,    setShowSettings]   = useState(false);
   const [theme,           setTheme]          = useState(() => localStorage.getItem("theme") || "dark");
+  const [colorSchemeId,   setColorSchemeId]  = useState(() => localStorage.getItem("colorSchemeId") || "purple");
+  const [customScheme,    setCustomScheme]   = useState(() => { try { return JSON.parse(localStorage.getItem("customScheme")||"null") || DEFAULT_CUSTOM_SCHEME; } catch { return DEFAULT_CUSTOM_SCHEME; } });
   const [sbWidth,         setSbWidth]        = useState(() => Number(localStorage.getItem("sbWidth")) || 260);
   const [snWidth,         setSnWidth]        = useState(() => Number(localStorage.getItem("snWidth")) || 260);
   const [version,         setVersion]        = useState("");
@@ -92,33 +107,48 @@ export default function App() {
   const [pendingPassword, setPendingPassword]= useState("");
   const [twoFAEnabled,    setTwoFAEnabled]   = useState(false);
   const [termThemeId,     setTermThemeId]    = useState(() => localStorage.getItem("termThemeId") || "dark");
-  const [customTermTheme, setCustomTermTheme]= useState(() => {
-    try { return JSON.parse(localStorage.getItem("customTermTheme")||"null") || DEFAULT_CUSTOM_THEME; }
-    catch { return DEFAULT_CUSTOM_THEME; }
-  });
-  const [sessionLogs,    setSessionLogs]    = useState({});
-  const [loggingEnabled, setLoggingEnabled] = useState(() => new Set());
+  const [customTermTheme, setCustomTermTheme]= useState(() => { try { return JSON.parse(localStorage.getItem("customTermTheme")||"null") || DEFAULT_CUSTOM_THEME; } catch { return DEFAULT_CUSTOM_THEME; } });
+  const [sessionLogs,     setSessionLogs]    = useState({});
+  const [loggingEnabled,  setLoggingEnabled] = useState(() => new Set());
 
   const nextId       = useRef(1);
   const workspaceRef = useRef(null);
   const termSenders  = useRef({});
   const isLoggingIn  = useRef(false);
 
+  // ---------- Init ----------
   useEffect(() => {
-    api.vaultStatus().then((s) => {
-      setVault(s);
-      if (s.twoFAEnabled !== undefined) setTwoFAEnabled(s.twoFAEnabled);
-      if (s.unlocked) { refreshData(); refreshSnippets(); }
+    api.authStatus().then((sso) => {
+      setSsoStatus(sso);
+      if (!sso.ssoEnabled || sso.ssoAuthenticated) {
+        api.vaultStatus().then((v) => {
+          setVault(v);
+          if (v.twoFAEnabled !== undefined) setTwoFAEnabled(v.twoFAEnabled);
+          if (v.unlocked) { refreshData(); refreshSnippets(); }
+        }).catch((e) => setError(e.message));
+      }
     }).catch((e) => setError(e.message));
     fetch("/api/version").then((r)=>r.json()).then((d)=>setVersion(d.version));
   }, []);
 
+  // ---------- Theme effects ----------
   useEffect(() => { localStorage.setItem("theme", theme); document.documentElement.dataset.theme = theme; }, [theme]);
+
+  useEffect(() => {
+    const scheme = colorSchemeId === "custom" ? customScheme : (COLOR_SCHEMES[colorSchemeId] || COLOR_SCHEMES.purple);
+    document.documentElement.style.setProperty("--accent",       scheme.accent);
+    document.documentElement.style.setProperty("--accent-light", scheme.accentLight);
+    document.documentElement.style.setProperty("--tab-base",     scheme.tabBase);
+    localStorage.setItem("colorSchemeId", colorSchemeId);
+  }, [colorSchemeId, customScheme]);
+
+  useEffect(() => { localStorage.setItem("customScheme", JSON.stringify(customScheme)); }, [customScheme]);
   useEffect(() => { localStorage.setItem("sbWidth", String(sbWidth)); }, [sbWidth]);
   useEffect(() => { localStorage.setItem("snWidth", String(snWidth)); }, [snWidth]);
   useEffect(() => { localStorage.setItem("termThemeId", termThemeId); }, [termThemeId]);
   useEffect(() => { localStorage.setItem("customTermTheme", JSON.stringify(customTermTheme)); }, [customTermTheme]);
 
+  // ---------- Vault-locked listener ----------
   useEffect(() => {
     function handleVaultLocked() {
       if (isLoggingIn.current) return;
@@ -154,45 +184,33 @@ export default function App() {
   async function refreshData()    { setHosts(await api.listHosts()); setFolders(await api.listFolders()); }
   async function refreshSnippets(){ setSnippets(await api.listSnippets()); setSnippetFolders(await api.listSnippetFolders()); }
 
-  function notify(msg, type="info") {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 3000);
-  }
+  function notify(msg, type="info") { setNotification({ msg, type }); setTimeout(() => setNotification(null), 3000); }
 
   async function handleUnlock(password) {
-    isLoggingIn.current = true;
-    setError("");
+    isLoggingIn.current = true; setError("");
     try {
       if (!vault.setUp) {
         await api.vaultSetup(password);
-        setVault({ setUp: true, unlocked: true });
-        await refreshData(); await refreshSnippets();
-        return;
+        setVault({ setUp:true, unlocked:true });
+        await refreshData(); await refreshSnippets(); return;
       }
       const result = await api.vaultUnlock(password, null);
       if (result.requires2fa) { setPendingPassword(password); setRequires2fa(true); return; }
-      setVault({ setUp: true, unlocked: true });
+      setVault({ setUp:true, unlocked:true });
       await refreshData(); await refreshSnippets();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      isLoggingIn.current = false;
-    }
+    } catch (e) { setError(e.message); }
+    finally { isLoggingIn.current = false; }
   }
 
   async function handle2FA(token) {
-    isLoggingIn.current = true;
-    setError("");
+    isLoggingIn.current = true; setError("");
     try {
       await api.vaultUnlock(pendingPassword, token);
       setPendingPassword(""); setRequires2fa(false);
-      setVault({ setUp: true, unlocked: true });
+      setVault({ setUp:true, unlocked:true });
       await refreshData(); await refreshSnippets();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      isLoggingIn.current = false;
-    }
+    } catch (e) { setError(e.message); }
+    finally { isLoggingIn.current = false; }
   }
 
   async function handleLock() {
@@ -202,7 +220,7 @@ export default function App() {
     setTabGroups([]); setCollapsedGroups(new Set());
     setRequires2fa(false); setPendingPassword("");
     setShowSettings(false); setShowSnippets(false);
-    setVault({ ...vault, unlocked: false });
+    setVault({ ...vault, unlocked:false });
   }
 
   function createGroup(name, color) { const id=Date.now(); setTabGroups((p)=>[...p,{id,name,color}]); return id; }
@@ -293,8 +311,7 @@ export default function App() {
   function sendSnippet(command) { const fn=termSenders.current[activeId]; if(fn) fn(command+"\r"); }
 
   function handleOutput(sessionId, data) {
-    if (loggingEnabled.has(sessionId))
-      setSessionLogs((p)=>({...p,[sessionId]:(p[sessionId]||"")+data}));
+    if (loggingEnabled.has(sessionId)) setSessionLogs((p)=>({...p,[sessionId]:(p[sessionId]||"")+data}));
   }
   function toggleLogging(id) { setLoggingEnabled((p)=>{ const n=new Set(p); n.has(id)?n.delete(id):n.add(id); return n; }); }
   function downloadLog(id) {
@@ -306,11 +323,26 @@ export default function App() {
     a.download=filename; a.click(); URL.revokeObjectURL(a.href);
   }
 
-  const visibleIds = split
-    ? new Set([split.leftId,split.rightId].filter((x)=>x!=null))
-    : new Set(activeId!=null?[activeId]:[]);
+  const visibleIds       = split ? new Set([split.leftId,split.rightId].filter((x)=>x!=null)) : new Set(activeId!=null?[activeId]:[]);
   const connectedHostIds = new Set(sessions.filter((s)=>s.status==="connected").map((s)=>s.host.id));
   const activeSession    = sessions.find((s)=>s.id===activeId);
+
+  // ---------- SSO gate ----------
+  if (ssoStatus?.ssoEnabled && !ssoStatus?.ssoAuthenticated) {
+    return (
+      <div className="app">
+        <header className="topbar"><span className="logo">SSH Manager</span></header>
+        <div className="center-screen">
+          <div className="card">
+            <h2>SSH Manager</h2>
+            <p className="muted small">This instance requires authentication via your organisation's SSO provider.</p>
+            <a href="/auth/login" className="btn" style={{ textAlign:"center", textDecoration:"none" }}>Sign in with SSO</a>
+            {error && <p className="error">{error}</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!vault) return <div className="center-screen">Loading…</div>;
 
@@ -320,10 +352,16 @@ export default function App() {
         <span className="logo">SSH Manager</span>
         {vault.unlocked && (
           <div className="topbar-actions">
+            {ssoStatus?.ssoEnabled && ssoStatus?.ssoUser && (
+              <span className="sso-user muted small">{ssoStatus.ssoUser.name}</span>
+            )}
             <button className={showSnippets?"btn btn-ghost btn-active":"btn btn-ghost"} onClick={()=>setShowSnippets((v)=>!v)}>Snippets</button>
             <button className="btn btn-ghost" onClick={()=>setTheme(theme==="dark"?"light":"dark")}>{theme==="dark"?"Light":"Dark"}</button>
             <button className="btn btn-ghost" onClick={()=>{ api.setVaultLockedSuppressed(true); setShowSettings(true); }}>⚙</button>
-            <button className="btn btn-ghost" onClick={handleLock}>Lock</button>
+            {ssoStatus?.ssoEnabled
+              ? <a href="/auth/logout" className="btn btn-ghost" style={{textDecoration:"none"}}>Sign out</a>
+              : <button className="btn btn-ghost" onClick={handleLock}>Lock</button>
+            }
           </div>
         )}
       </header>
@@ -377,29 +415,16 @@ export default function App() {
               })}
               {sessions.length===0&&<RecentHosts hosts={hosts} onOpen={openSession}/>}
             </div>
-            <StatusBar
-              session={activeSession}
-              logging={loggingEnabled.has(activeId)}
-              hasLog={!!(sessionLogs[activeId])}
-              onToggleLog={()=>toggleLogging(activeId)}
-              onDownloadLog={()=>downloadLog(activeId)}
-            />
+            <StatusBar session={activeSession} logging={loggingEnabled.has(activeId)} hasLog={!!(sessionLogs[activeId])} onToggleLog={()=>toggleLogging(activeId)} onDownloadLog={()=>downloadLog(activeId)} />
           </main>
           {showSnippets&&<div className="sb-resizer" onPointerDown={startSnResize}/>}
-          {showSnippets&&(
-            <SnippetPanel
-              snippets={snippets} folders={snippetFolders}
-              onChanged={refreshSnippets} onSend={sendSnippet}
-              hasActive={activeId!=null} width={snWidth}
-            />
-          )}
+          {showSnippets&&<SnippetPanel snippets={snippets} folders={snippetFolders} onChanged={refreshSnippets} onSend={sendSnippet} hasActive={activeId!=null} width={snWidth}/>}
         </div>
       )}
 
       {groupMenu&&(
         <TabGroupContextMenu x={groupMenu.x} y={groupMenu.y}
-          session={sessions.find((s)=>s.id===groupMenu.sessionId)}
-          tabGroups={tabGroups}
+          session={sessions.find((s)=>s.id===groupMenu.sessionId)} tabGroups={tabGroups}
           onAssign={(gid)=>{assignToGroup(groupMenu.sessionId,gid);setGroupMenu(null);}}
           onRemove={()=>{removeFromGroup(groupMenu.sessionId);setGroupMenu(null);}}
           onCreate={(name,color)=>{const id=createGroup(name,color);assignToGroup(groupMenu.sessionId,id);setGroupMenu(null);}}
@@ -413,13 +438,16 @@ export default function App() {
       {showSettings&&(
         <SettingsModal
           twoFAEnabled={twoFAEnabled}
-          termThemeId={termThemeId}
-          customTermTheme={customTermTheme}
-          onThemeChange={(id)=>setTermThemeId(id)}
-          onCustomColor={(k,v)=>setCustomTermTheme((p)=>({...p,[k]:v}))}
+          termThemeId={termThemeId} customTermTheme={customTermTheme}
+          colorSchemeId={colorSchemeId} customScheme={customScheme}
+          onTermThemeChange={(id)=>setTermThemeId(id)}
+          onCustomTermColor={(k,v)=>setCustomTermTheme((p)=>({...p,[k]:v}))}
+          onColorSchemeChange={(id)=>setColorSchemeId(id)}
+          onCustomSchemeColor={(k,v)=>setCustomScheme((p)=>({...p,[k]:v}))}
           onClose={()=>{ api.setVaultLockedSuppressed(false); setShowSettings(false); }}
           onRefresh={()=>{ refreshData(); refreshSnippets(); }}
           on2FAChange={(enabled)=>setTwoFAEnabled(enabled)}
+          ssoEnabled={ssoStatus?.ssoEnabled}
           onWiped={()=>{
             setSessions([]); setTabOrder([]); setActiveId(null); setSplit(null);
             setTabGroups([]); setCollapsedGroups(new Set());
@@ -446,8 +474,7 @@ function UnlockScreen({ setUp, onSubmit, on2FA, requires2fa, error }) {
           <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6}
             placeholder="000000" value={code} autoFocus className="totp-input"
             onChange={(e)=>setCode(e.target.value.replace(/\D/g,""))}
-            onKeyDown={(e)=>e.key==="Enter"&&on2FA(code)}
-          />
+            onKeyDown={(e)=>e.key==="Enter"&&on2FA(code)} />
           <button className="btn" onClick={()=>on2FA(code)}>Verify</button>
           {error&&<p className="error">{error}</p>}
         </div>
@@ -475,11 +502,7 @@ function TabGroupContextMenu({ x, y, session, tabGroups, onAssign, onRemove, onC
   const [newColor, setNewColor] = useState(GROUP_COLORS[0]);
   const ref = useRef(null);
 
-  useEffect(()=>{
-    function h(e){ if(ref.current&&!ref.current.contains(e.target)) onClose(); }
-    document.addEventListener("mousedown",h);
-    return ()=>document.removeEventListener("mousedown",h);
-  },[]);
+  useEffect(()=>{ function h(e){ if(ref.current&&!ref.current.contains(e.target)) onClose(); } document.addEventListener("mousedown",h); return ()=>document.removeEventListener("mousedown",h); },[]);
 
   const mx=Math.min(x,window.innerWidth-240), my=Math.min(y,window.innerHeight-320);
 
@@ -500,11 +523,7 @@ function TabGroupContextMenu({ x, y, session, tabGroups, onAssign, onRemove, onC
         <div className="group-new-form">
           <input autoFocus placeholder="Group name" value={newName} onChange={(e)=>setNewName(e.target.value)}
             onKeyDown={(e)=>{if(e.key==="Enter"&&newName.trim())onCreate(newName.trim(),newColor);if(e.key==="Escape")setShowNew(false);}}/>
-          <div className="color-picker">
-            {GROUP_COLORS.map((c)=>(
-              <div key={c} className={"color-swatch"+(newColor===c?" selected":"")} style={{background:c}} onClick={()=>setNewColor(c)}/>
-            ))}
-          </div>
+          <div className="color-picker">{GROUP_COLORS.map((c)=>(<div key={c} className={"color-swatch"+(newColor===c?" selected":"")} style={{background:c}} onClick={()=>setNewColor(c)}/>))}</div>
           <button className="btn btn-small" onClick={()=>{if(newName.trim())onCreate(newName.trim(),newColor);}}>Create</button>
         </div>
       )}
@@ -514,17 +533,13 @@ function TabGroupContextMenu({ x, y, session, tabGroups, onAssign, onRemove, onC
 
 function TabBar({ sessions, tabOrder, activeId, visibleIds, split, workspaceRef, tabGroups, collapsedGroups,
   onSelect, onClose, onReorder, onSplitHint, onSplitDrop, onExitSplit, onToggleGroupCollapse, onGroupContextMenu }) {
-  const refs          = useRef({});
-  const dragData      = useRef(null);
-  const suppressClick = useRef(false);
+  const refs=useRef({}); const dragData=useRef(null); const suppressClick=useRef(false);
   const [drag, setDrag] = useState(null);
-
   const ordered      = tabOrder.map((id)=>sessions.find((s)=>s.id===id)).filter(Boolean);
   const displayItems = buildDisplayItems(ordered, tabGroups, collapsedGroups);
 
   function onPointerDown(e, id, idx) {
-    if (e.button!==0) return;
-    if (e.target.closest(".tab-close")) return;
+    if (e.button!==0) return; if (e.target.closest(".tab-close")) return;
     const rects=ordered.map((s)=>refs.current[s.id]?.getBoundingClientRect()).filter(Boolean);
     if (!rects[idx]) return;
     dragData.current={id,fromIdx:idx,startX:e.clientX,startY:e.clientY,rects,width:rects[idx].width,moved:false,splitSide:null};
@@ -552,11 +567,7 @@ function TabBar({ sessions, tabOrder, activeId, visibleIds, split, workspaceRef,
   function onPointerUp() {
     const d=dragData.current; if(!d) return;
     dragData.current=null; onSplitHint(null);
-    if (d.moved) {
-      suppressClick.current=true;
-      if(d.splitSide) onSplitDrop(d.id,d.splitSide);
-      else if(drag&&drag.toIdx!==drag.fromIdx) onReorder(drag.fromIdx,drag.toIdx);
-    }
+    if (d.moved) { suppressClick.current=true; if(d.splitSide) onSplitDrop(d.id,d.splitSide); else if(drag&&drag.toIdx!==drag.fromIdx) onReorder(drag.fromIdx,drag.toIdx); }
     setDrag(null);
   }
 
@@ -583,15 +594,12 @@ function TabBar({ sessions, tabOrder, activeId, visibleIds, split, workspaceRef,
             </div>
           );
         }
-        const {session:s,group}=item;
-        const orderedIdx=ordered.findIndex((o)=>o.id===s.id);
+        const {session:s,group}=item; const orderedIdx=ordered.findIndex((o)=>o.id===s.id);
         return (
-          <div key={s.id}
-            ref={(el)=>(refs.current[s.id]=el)}
+          <div key={s.id} ref={(el)=>(refs.current[s.id]=el)}
             className={"tab"+(s.id===activeId?" active":visibleIds.has(s.id)?" shown":"")+(group?" grouped":"")}
             style={{...styleFor(orderedIdx,s),...(group?{borderBottom:`2px solid ${group.color}`}:{})}}
-            onPointerDown={(e)=>onPointerDown(e,s.id,orderedIdx)}
-            onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+            onPointerDown={(e)=>onPointerDown(e,s.id,orderedIdx)} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
             onContextMenu={(e)=>{e.preventDefault();onGroupContextMenu(e.clientX,e.clientY,s.id);}}
             onClick={()=>{if(suppressClick.current){suppressClick.current=false;return;}onSelect(s.id);}}
           >
@@ -623,8 +631,7 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version,
 
   async function dropOn(folderId){
     const id=dragHostId; setDragHostId(null); setDropTarget(undefined);
-    if(id==null) return;
-    const host=hosts.find((h)=>h.id===id);
+    if(id==null) return; const host=hosts.find((h)=>h.id===id);
     if(!host||(host.folder_id??null)===folderId) return;
     await api.updateHost(id,{folder_id:folderId}); onChanged();
   }
@@ -644,48 +651,31 @@ function Sidebar({ hosts, folders, connectedHostIds, onOpen, onChanged, version,
           <button className="btn btn-small" onClick={()=>setFormHost(formHost===undefined?null:undefined)}>{formHost!==undefined?"✕":"+ Add"}</button>
         </div>
       </div>
-      <div className="filter-wrap">
-        <input placeholder="Filter by name, host, tag, notes…" value={filter} onChange={(e)=>setFilter(e.target.value)}/>
-      </div>
+      <div className="filter-wrap"><input placeholder="Filter by name, host, tag, notes…" value={filter} onChange={(e)=>setFilter(e.target.value)}/></div>
       {formHost!==undefined&&<HostForm host={formHost} folders={folders} onDone={()=>{setFormHost(undefined);onChanged();}}/>}
       <ul className="host-list">
-        {ungrouped.map((h)=>(
-          <HostRow key={h.id} host={h} connected={connectedHostIds.has(h.id)} onOpen={onOpen}
-            onEdit={()=>setFormHost(h)} onChanged={onChanged} onNotify={onNotify}
-            onDragStartHost={setDragHostId} onDragEndHost={()=>{setDragHostId(null);setDropTarget(undefined);}}/>
-        ))}
+        {ungrouped.map((h)=>(<HostRow key={h.id} host={h} connected={connectedHostIds.has(h.id)} onOpen={onOpen} onEdit={()=>setFormHost(h)} onChanged={onChanged} onNotify={onNotify} onDragStartHost={setDragHostId} onDragEndHost={()=>{setDragHostId(null);setDropTarget(undefined);}}/>))}
         {folders.map((f)=>{
-          const inFolder=hosts.filter((h)=>h.folder_id===f.id&&match(h)).sort(byFav);
-          const isCollapsed=collapsed.has(f.id);
+          const inFolder=hosts.filter((h)=>h.folder_id===f.id&&match(h)).sort(byFav); const isCollapsed=collapsed.has(f.id);
           return (
             <li key={`f${f.id}`} className="folder">
               <div className={"folder-head"+(dropTarget===f.id?" drop-target":"")} onClick={()=>toggleFolder(f.id)} {...dropProps(f.id)}>
-                <span className="chev">{isCollapsed?"▸":"▾"}</span>
-                <span className="folder-name">{f.name}</span>
-                <span className="muted small">({inFolder.length})</span>
+                <span className="chev">{isCollapsed?"▸":"▾"}</span><span className="folder-name">{f.name}</span><span className="muted small">({inFolder.length})</span>
                 <div className="host-actions">
                   <button onClick={async(e)=>{e.stopPropagation();const name=window.prompt("Rename folder:",f.name);if(name?.trim()){await api.renameFolder(f.id,name.trim());onChanged();}}}>Rename</button>
                   <button onClick={async(e)=>{e.stopPropagation();if(confirm(`Delete folder "${f.name}"? Hosts inside are kept.`)){await api.deleteFolder(f.id);onChanged();}}}>Delete</button>
                 </div>
               </div>
-              {!isCollapsed&&(
-                <ul className="folder-hosts">
-                  {inFolder.map((h)=>(
-                    <HostRow key={h.id} host={h} connected={connectedHostIds.has(h.id)} onOpen={onOpen}
-                      onEdit={()=>setFormHost(h)} onChanged={onChanged} onNotify={onNotify}
-                      onDragStartHost={setDragHostId} onDragEndHost={()=>{setDragHostId(null);setDropTarget(undefined);}}/>
-                  ))}
-                  {inFolder.length===0&&<li className="muted small pad">Empty</li>}
-                </ul>
-              )}
+              {!isCollapsed&&(<ul className="folder-hosts">
+                {inFolder.map((h)=>(<HostRow key={h.id} host={h} connected={connectedHostIds.has(h.id)} onOpen={onOpen} onEdit={()=>setFormHost(h)} onChanged={onChanged} onNotify={onNotify} onDragStartHost={setDragHostId} onDragEndHost={()=>{setDragHostId(null);setDropTarget(undefined);}}/>))}
+                {inFolder.length===0&&<li className="muted small pad">Empty</li>}
+              </ul>)}
             </li>
           );
         })}
         {hosts.length===0&&formHost===undefined&&<li className="muted small pad">No hosts yet.</li>}
       </ul>
-      <div className="sidebar-foot small">
-        <a className="repo-link muted" href="https://github.com/phiil-92/ssh-manager" target="_blank" rel="noopener noreferrer">v{version}</a>
-      </div>
+      <div className="sidebar-foot small"><a className="repo-link muted" href="https://github.com/phiil-92/ssh-manager" target="_blank" rel="noopener noreferrer">v{version}</a></div>
     </aside>
   );
 }
@@ -694,9 +684,7 @@ function HostRow({ host:h, connected, onOpen, onEdit, onChanged, onNotify, onDra
   const [showNotes, setShowNotes] = useState(false);
   const tags = (h.tags||"").split(",").map((t)=>t.trim()).filter(Boolean);
   return (
-    <li className="host" draggable
-      onDragStart={(e)=>{e.dataTransfer.effectAllowed="move";onDragStartHost(h.id);}}
-      onDragEnd={onDragEndHost} onClick={()=>onOpen(h)}>
+    <li className="host" draggable onDragStart={(e)=>{e.dataTransfer.effectAllowed="move";onDragStartHost(h.id);}} onDragEnd={onDragEndHost} onClick={()=>onOpen(h)}>
       <div className="host-name">
         {connected&&<span className="dot dot-connected"/>}
         {h.name}
@@ -708,13 +696,7 @@ function HostRow({ host:h, connected, onOpen, onEdit, onChanged, onNotify, onDra
       {showNotes&&h.notes&&<div className="host-notes">{h.notes}</div>}
       {tags.length>0&&<div className="chips">{tags.map((t)=><span key={t} className="chip">{t}</span>)}</div>}
       <div className="host-actions">
-        {h.mac_address&&(
-          <button title="Wake on LAN" onClick={async(e)=>{
-            e.stopPropagation();
-            try{await api.wakeOnLan(h.id);onNotify?.(`⚡ WOL sent to ${h.name}`);}
-            catch(err){onNotify?.(`WOL failed: ${err.message}`,"error");}
-          }}>⚡</button>
-        )}
+        {h.mac_address&&(<button title="Wake on LAN" onClick={async(e)=>{e.stopPropagation();try{await api.wakeOnLan(h.id);onNotify?.(`⚡ WOL sent to ${h.name}`);}catch(err){onNotify?.(`WOL failed: ${err.message}`,"error");}}}>⚡</button>)}
         <button onClick={(e)=>{e.stopPropagation();onEdit();}}>Edit</button>
         <button onClick={async(e)=>{e.stopPropagation();if(confirm(`Delete "${h.name}"?`)){await api.deleteHost(h.id);onChanged();}}}>Delete</button>
       </div>
@@ -725,35 +707,29 @@ function HostRow({ host:h, connected, onOpen, onEdit, onChanged, onNotify, onDra
 function HostForm({ host, folders, onDone }) {
   const editing = !!host;
   const [f, setF] = useState({
-    name:host?.name||"", hostname:host?.hostname||"", port:host?.port||22,
-    username:host?.username||"", password:"", clearPassword:false,
-    auth_type:host?.auth_type||"password", private_key:"", key_passphrase:"", clearKey:false,
-    folder_id:host?.folder_id||"", tags:host?.tags||"",
-    favorite:host?.favorite?true:false, notes:host?.notes||"", mac_address:host?.mac_address||"",
+    name:host?.name||"", hostname:host?.hostname||"", port:host?.port||22, username:host?.username||"",
+    password:"", clearPassword:false, auth_type:host?.auth_type||"password", private_key:"", key_passphrase:"", clearKey:false,
+    folder_id:host?.folder_id||"", tags:host?.tags||"", favorite:host?.favorite?true:false, notes:host?.notes||"", mac_address:host?.mac_address||"",
   });
   const [error, setError] = useState("");
   const set=(k)=>(e)=>setF({...f,[k]:e.target.value});
 
   async function save() {
     setError("");
-    try {
-      const payload={...f,port:Number(f.port)||22,folder_id:f.folder_id?Number(f.folder_id):null};
-      if(editing) await api.updateHost(host.id,payload);
-      else        await api.addHost(payload);
-      onDone();
-    } catch(e){setError(e.message);}
+    try { const payload={...f,port:Number(f.port)||22,folder_id:f.folder_id?Number(f.folder_id):null}; if(editing) await api.updateHost(host.id,payload); else await api.addHost(payload); onDone(); }
+    catch(e){setError(e.message);}
   }
 
   return (
     <div className="add-form">
-      <input placeholder="Name (e.g. Dev Server)"  value={f.name}     onChange={set("name")}     autoFocus/>
-      <input placeholder="Hostname / IP"            value={f.hostname} onChange={set("hostname")}/>
-      <input placeholder="Port" type="number"       value={f.port}     onChange={set("port")}/>
+      <input placeholder="Name (e.g. Dev Server)" value={f.name} onChange={set("name")} autoFocus/>
+      <input placeholder="Hostname / IP" value={f.hostname} onChange={set("hostname")}/>
+      <input placeholder="Port" type="number" value={f.port} onChange={set("port")}/>
       <input placeholder="Username (empty = ask on connect)" value={f.username} onChange={set("username")}/>
       <div className="form-label">Authentication</div>
       <div className="auth-toggle">
         <button className={"auth-opt"+(f.auth_type==="password"?" active":"")} onClick={()=>setF({...f,auth_type:"password"})}>Password</button>
-        <button className={"auth-opt"+(f.auth_type==="key"     ?" active":"")} onClick={()=>setF({...f,auth_type:"key"     })}>SSH Key</button>
+        <button className={"auth-opt"+(f.auth_type==="key"?" active":"")} onClick={()=>setF({...f,auth_type:"key"})}>SSH Key</button>
       </div>
       {f.auth_type==="password"&&(<>
         <input placeholder={editing&&host.has_password?"Password (empty = keep current)":"Password (empty = ask on connect)"} type="password" value={f.password} onChange={set("password")}/>
@@ -764,11 +740,8 @@ function HostForm({ host, folders, onDone }) {
         <input placeholder="Key passphrase (empty = ask if needed)" type="password" value={f.key_passphrase} onChange={set("key_passphrase")}/>
         {editing&&host.has_private_key&&<label className="small muted checkline"><input type="checkbox" checked={f.clearKey} onChange={(e)=>setF({...f,clearKey:e.target.checked})}/> Remove saved key</label>}
       </>)}
-      <select value={f.folder_id} onChange={set("folder_id")}>
-        <option value="">No folder</option>
-        {folders.map((fo)=><option key={fo.id} value={fo.id}>{fo.name}</option>)}
-      </select>
-      <input placeholder="Tags (comma separated)"  value={f.tags} onChange={set("tags")}/>
+      <select value={f.folder_id} onChange={set("folder_id")}><option value="">No folder</option>{folders.map((fo)=><option key={fo.id} value={fo.id}>{fo.name}</option>)}</select>
+      <input placeholder="Tags (comma separated)" value={f.tags} onChange={set("tags")}/>
       <input placeholder="MAC address for Wake on LAN (e.g. AA:BB:CC:DD:EE:FF)" value={f.mac_address} onChange={set("mac_address")}/>
       <textarea className="notes-textarea" placeholder="Notes (services, anything useful)" value={f.notes} onChange={set("notes")} rows={3}/>
       <label className="small muted checkline"><input type="checkbox" checked={f.favorite} onChange={(e)=>setF({...f,favorite:e.target.checked})}/> Favourite</label>
@@ -786,186 +759,102 @@ function SnippetPanel({ snippets, folders, onChanged, onSend, hasActive, width }
   const [folderId,     setFolderId]     = useState("");
   const [favorite,     setFavorite]     = useState(false);
   const [filter,       setFilter]       = useState("");
-  const [collapsed,    setCollapsed]    = useState(() => new Set());
+  const [collapsed,    setCollapsed]    = useState(()=>new Set());
   const [dragSnippetId,setDragSnippetId]= useState(null);
   const [dropTarget,   setDropTarget]   = useState(undefined);
 
-  function startAdd() {
-    setEditing(null); setName(""); setCommand("");
-    setFolderId(""); setFavorite(false); setShowForm(true);
-  }
-  function startEdit(s) {
-    setEditing(s); setName(s.name); setCommand(s.command);
-    setFolderId(s.folder_id ? String(s.folder_id) : "");
-    setFavorite(!!s.favorite); setShowForm(true);
-  }
+  function startAdd() { setEditing(null);setName("");setCommand("");setFolderId("");setFavorite(false);setShowForm(true); }
+  function startEdit(s) { setEditing(s);setName(s.name);setCommand(s.command);setFolderId(s.folder_id?String(s.folder_id):"");setFavorite(!!s.favorite);setShowForm(true); }
 
   async function save() {
-    if (!name.trim() || !command.trim()) return;
-    const payload = { name: name.trim(), command: command.trim(), folder_id: folderId ? Number(folderId) : null, favorite };
-    if (editing) await api.updateSnippet(editing.id, payload);
-    else         await api.addSnippet(payload);
+    if (!name.trim()||!command.trim()) return;
+    const payload={name:name.trim(),command:command.trim(),folder_id:folderId?Number(folderId):null,favorite};
+    if(editing) await api.updateSnippet(editing.id,payload); else await api.addSnippet(payload);
     setShowForm(false); onChanged();
   }
 
-  async function addFolder() {
-    const n = window.prompt("Folder name:");
-    if (n?.trim()) { await api.addSnippetFolder(n.trim()); onChanged(); }
-  }
-
-  function toggleCollapse(id) {
-    setCollapsed((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  }
+  async function addFolder() { const n=window.prompt("Folder name:"); if(n?.trim()){await api.addSnippetFolder(n.trim());onChanged();} }
+  function toggleCollapse(id) { setCollapsed((c)=>{const n=new Set(c);n.has(id)?n.delete(id):n.add(id);return n;}); }
 
   async function dropOn(folderId) {
-    const id = dragSnippetId;
-    setDragSnippetId(null); setDropTarget(undefined);
-    if (id == null) return;
-    const snippet = snippets.find((s) => s.id === id);
-    if (!snippet || (snippet.folder_id ?? null) === folderId) return;
-    await api.updateSnippet(id, { folder_id: folderId });
-    onChanged();
+    const id=dragSnippetId; setDragSnippetId(null); setDropTarget(undefined);
+    if(id==null) return; const snippet=snippets.find((s)=>s.id===id);
+    if(!snippet||(snippet.folder_id??null)===folderId) return;
+    await api.updateSnippet(id,{folder_id:folderId}); onChanged();
   }
 
-  const dropProps = (folderId) => ({
-    onDragOver:  (e) => { if (dragSnippetId == null) return; e.preventDefault(); setDropTarget(folderId); },
-    onDragLeave: () => setDropTarget(undefined),
-    onDrop:      (e) => { e.preventDefault(); dropOn(folderId); },
+  const dropProps=(folderId)=>({
+    onDragOver:(e)=>{if(dragSnippetId==null)return;e.preventDefault();setDropTarget(folderId);},
+    onDragLeave:()=>setDropTarget(undefined),
+    onDrop:(e)=>{e.preventDefault();dropOn(folderId);},
   });
 
-  const q      = filter.trim().toLowerCase();
-  const match  = (s) => !q || s.name.toLowerCase().includes(q) || s.command.toLowerCase().includes(q);
-  const byFav  = (a, b) => (b.favorite - a.favorite) || a.name.localeCompare(b.name);
-  const ungrouped = snippets.filter((s) => !s.folder_id && match(s)).sort(byFav);
+  const q=filter.trim().toLowerCase();
+  const match=(s)=>!q||s.name.toLowerCase().includes(q)||s.command.toLowerCase().includes(q);
+  const byFav=(a,b)=>(b.favorite-a.favorite)||a.name.localeCompare(b.name);
+  const ungrouped=snippets.filter((s)=>!s.folder_id&&match(s)).sort(byFav);
 
   return (
-    <aside className="snippet-panel" style={{ width }}>
-      <div
-        className={"snippet-head" + (dragSnippetId != null && dropTarget === null ? " drop-target" : "")}
-        {...dropProps(null)}
-      >
-        <span>{dragSnippetId != null ? "Drop here to unfile" : "Snippets"}</span>
+    <aside className="snippet-panel" style={{width}}>
+      <div className={"snippet-head"+(dragSnippetId!=null&&dropTarget===null?" drop-target":"")} {...dropProps(null)}>
+        <span>{dragSnippetId!=null?"Drop here to unfile":"Snippets"}</span>
         <div className="snippet-head-actions">
           <button className="btn btn-small" onClick={addFolder}>+ Folder</button>
           <button className="btn btn-small" onClick={startAdd}>+ Add</button>
         </div>
       </div>
-
-      <div className="filter-wrap">
-        <input placeholder="Search snippets…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      </div>
-
-      {showForm && (
+      <div className="filter-wrap"><input placeholder="Search snippets…" value={filter} onChange={(e)=>setFilter(e.target.value)}/></div>
+      {showForm&&(
         <div className="snippet-form">
-          <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          <textarea className="snippet-textarea" placeholder="Command" value={command} onChange={(e) => setCommand(e.target.value)} rows={3} />
-          <select value={folderId} onChange={(e) => setFolderId(e.target.value)}>
-            <option value="">No folder</option>
-            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
-          <label className="small muted checkline">
-            <input type="checkbox" checked={favorite} onChange={(e) => setFavorite(e.target.checked)} />
-            Favourite
-          </label>
+          <input placeholder="Name" value={name} onChange={(e)=>setName(e.target.value)} autoFocus/>
+          <textarea className="snippet-textarea" placeholder="Command" value={command} onChange={(e)=>setCommand(e.target.value)} rows={3}/>
+          <select value={folderId} onChange={(e)=>setFolderId(e.target.value)}><option value="">No folder</option>{folders.map((f)=><option key={f.id} value={f.id}>{f.name}</option>)}</select>
+          <label className="small muted checkline"><input type="checkbox" checked={favorite} onChange={(e)=>setFavorite(e.target.checked)}/> Favourite</label>
           <div className="snippet-form-btns">
             <button className="btn btn-small" onClick={save}>Save</button>
-            <button className="btn btn-small btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
+            <button className="btn btn-small btn-ghost" onClick={()=>setShowForm(false)}>Cancel</button>
           </div>
         </div>
       )}
-
       <ul className="snippet-list">
-        {ungrouped.map((s) => (
-          <SnippetRow key={s.id} snippet={s} hasActive={hasActive}
-            onSend={onSend} onEdit={startEdit} onChanged={onChanged}
-            onDragStart={setDragSnippetId}
-            onDragEnd={() => { setDragSnippetId(null); setDropTarget(undefined); }}
-          />
-        ))}
-
-        {folders.map((f) => {
-          const inFolder   = snippets.filter((s) => s.folder_id === f.id && match(s)).sort(byFav);
-          const isCollapsed = collapsed.has(f.id);
+        {ungrouped.map((s)=>(<SnippetRow key={s.id} snippet={s} hasActive={hasActive} onSend={onSend} onEdit={startEdit} onChanged={onChanged} onDragStart={setDragSnippetId} onDragEnd={()=>{setDragSnippetId(null);setDropTarget(undefined);}}/>))}
+        {folders.map((f)=>{
+          const inFolder=snippets.filter((s)=>s.folder_id===f.id&&match(s)).sort(byFav); const isCollapsed=collapsed.has(f.id);
           return (
             <li key={`sf${f.id}`} className="folder">
-              <div
-                className={"folder-head" + (dropTarget === f.id ? " drop-target" : "")}
-                onClick={() => toggleCollapse(f.id)}
-                {...dropProps(f.id)}
-              >
-                <span className="chev">{isCollapsed ? "▸" : "▾"}</span>
-                <span className="folder-name">{f.name}</span>
-                <span className="muted small">({inFolder.length})</span>
+              <div className={"folder-head"+(dropTarget===f.id?" drop-target":"")} onClick={()=>toggleCollapse(f.id)} {...dropProps(f.id)}>
+                <span className="chev">{isCollapsed?"▸":"▾"}</span><span className="folder-name">{f.name}</span><span className="muted small">({inFolder.length})</span>
                 <div className="host-actions">
-                  <button onClick={async (e) => {
-                    e.stopPropagation();
-                    const n = window.prompt("Rename folder:", f.name);
-                    if (n?.trim()) { await api.renameSnippetFolder(f.id, n.trim()); onChanged(); }
-                  }}>Rename</button>
-                  <button onClick={async (e) => {
-                    e.stopPropagation();
-                    if (confirm(`Delete folder "${f.name}"? Snippets inside are kept.`)) {
-                      await api.deleteSnippetFolder(f.id); onChanged();
-                    }
-                  }}>Delete</button>
+                  <button onClick={async(e)=>{e.stopPropagation();const n=window.prompt("Rename folder:",f.name);if(n?.trim()){await api.renameSnippetFolder(f.id,n.trim());onChanged();}}}>Rename</button>
+                  <button onClick={async(e)=>{e.stopPropagation();if(confirm(`Delete folder "${f.name}"? Snippets inside are kept.`)){await api.deleteSnippetFolder(f.id);onChanged();}}}>Delete</button>
                 </div>
               </div>
-              {!isCollapsed && (
-                <ul className="folder-hosts">
-                  {inFolder.map((s) => (
-                    <SnippetRow key={s.id} snippet={s} hasActive={hasActive}
-                      onSend={onSend} onEdit={startEdit} onChanged={onChanged}
-                      onDragStart={setDragSnippetId}
-                      onDragEnd={() => { setDragSnippetId(null); setDropTarget(undefined); }}
-                    />
-                  ))}
-                  {inFolder.length === 0 && <li className="muted small pad">Empty</li>}
-                </ul>
-              )}
+              {!isCollapsed&&(<ul className="folder-hosts">
+                {inFolder.map((s)=>(<SnippetRow key={s.id} snippet={s} hasActive={hasActive} onSend={onSend} onEdit={startEdit} onChanged={onChanged} onDragStart={setDragSnippetId} onDragEnd={()=>{setDragSnippetId(null);setDropTarget(undefined);}}/>))}
+                {inFolder.length===0&&<li className="muted small pad">Empty</li>}
+              </ul>)}
             </li>
           );
         })}
-
-        {snippets.length === 0 && !showForm && (
-          <li className="muted small pad">No snippets yet.</li>
-        )}
+        {snippets.length===0&&!showForm&&<li className="muted small pad">No snippets yet.</li>}
       </ul>
     </aside>
   );
 }
 
-function SnippetRow({ snippet: s, hasActive, onSend, onEdit, onChanged, onDragStart, onDragEnd }) {
+function SnippetRow({ snippet:s, hasActive, onSend, onEdit, onChanged, onDragStart, onDragEnd }) {
   return (
-    <li
-      className={"snippet-item" + (hasActive ? "" : " disabled")}
-      draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(s.id); }}
-      onDragEnd={onDragEnd}
-    >
+    <li className={"snippet-item"+(hasActive?"":" disabled")} draggable onDragStart={(e)=>{e.dataTransfer.effectAllowed="move";onDragStart(s.id);}} onDragEnd={onDragEnd}>
       <div className="snippet-name-row">
-        <span
-          className="snippet-name"
-          // please work holy shit
-          style={{ color: "#8f86d4", opacity: 1 }}
-          title={hasActive ? "Click to run" : "Open a session first"}
-          onClick={() => hasActive && onSend(s.command + "\r")}
-        >
-          {!!s.favorite && <span className="star-badge">★</span>}
-          {s.name}
+        <span className="snippet-name" style={{color:"#8f86d4",opacity:1}} title={hasActive?"Click to run":"Open a session first"} onClick={()=>hasActive&&onSend(s.command+"\r")}>
+          {!!s.favorite&&<span className="star-badge">★</span>}{s.name}
         </span>
       </div>
       <div className="snippet-cmd">{s.command}</div>
       <div className="snippet-actions">
-        <button onClick={async (e) => {
-          e.stopPropagation();
-          await api.updateSnippet(s.id, { favorite: !s.favorite });
-          onChanged();
-        }}>{s.favorite ? "Unfav" : "Fav"}</button>
-        <button onClick={(e) => { e.stopPropagation(); onEdit(s); }}>Edit</button>
-        <button onClick={async (e) => {
-          e.stopPropagation();
-          if (confirm(`Delete "${s.name}"?`)) { await api.deleteSnippet(s.id); onChanged(); }
-        }}>Delete</button>
+        <button onClick={async(e)=>{e.stopPropagation();await api.updateSnippet(s.id,{favorite:!s.favorite});onChanged();}}>{s.favorite?"Unfav":"Fav"}</button>
+        <button onClick={(e)=>{e.stopPropagation();onEdit(s);}}>Edit</button>
+        <button onClick={async(e)=>{e.stopPropagation();if(confirm(`Delete "${s.name}"?`)){await api.deleteSnippet(s.id);onChanged();}}}>Delete</button>
       </div>
     </li>
   );
@@ -992,7 +881,7 @@ function RecentHosts({ hosts, onOpen }) {
 }
 
 function StatusBar({ session, logging, hasLog, onToggleLog, onDownloadLog }) {
-  const [, tick] = useState(0);
+  const [,tick]=useState(0);
   useEffect(()=>{const t=setInterval(()=>tick((n)=>n+1),1000);return()=>clearInterval(t);},[]);
   if (!session||session.status!=="connected") return null;
   const st=session.stats;
@@ -1004,25 +893,25 @@ function StatusBar({ session, logging, hasLog, onToggleLog, onDownloadLog }) {
       <span className="sb-item"><b>{session.host.name}</b></span>
       <span className="sb-item">user: {st?.user??"…"}</span>
       <span className="sb-item">ping: {st?.ping!=null?`${st.ping} ms`:"…"}</span>
-      <span className="sb-item">cpu:  {st?.cpu!=null?`${st.cpu.toFixed(0)}%`:"…"}</span>
-      <span className="sb-item">ram:  {st?.memTotal?`${gb(st.memUsed)} / ${gb(st.memTotal)} GB`:"…"}</span>
+      <span className="sb-item">cpu: {st?.cpu!=null?`${st.cpu.toFixed(0)}%`:"…"}</span>
+      <span className="sb-item">ram: {st?.memTotal?`${gb(st.memUsed)} / ${gb(st.memTotal)} GB`:"…"}</span>
       <span className="sb-item">disk: {st?.diskTotal?`${gb(st.diskUsed)} / ${gb(st.diskTotal)} GB`:"…"}</span>
       <span className="sb-item">session: {dur!=null?fmtDur(dur):"…"}</span>
       <div className="sb-log-controls">
-        <button className={"sb-log-btn"+(logging?" active":"")} onClick={onToggleLog} title={logging?"Stop logging":"Start logging"}>
-          {logging?"⏹ Logging":"⏺ Log"}
-        </button>
+        <button className={"sb-log-btn"+(logging?" active":"")} onClick={onToggleLog} title={logging?"Stop logging":"Start logging"}>{logging?"⏹ Logging":"⏺ Log"}</button>
         {hasLog&&<button className="sb-log-btn" onClick={onDownloadLog} title="Download log">⬇</button>}
       </div>
     </div>
   );
 }
 
-function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, onThemeChange, onCustomColor, onClose, onRefresh, on2FAChange, onWiped }) {
-  const [cur, setCur]=useState(""); const [nw, setNw]=useState(""); const [nw2, setNw2]=useState("");
-  const [pwMsg, setPwMsg]=useState(""); const [pwErr, setPwErr]=useState("");
-  const [exportPw, setExportPw]=useState(""); const [exportMsg, setExportMsg]=useState(""); const [exportErr, setExportErr]=useState("");
-  const [importFile, setImportFile]=useState(null); const [importPw, setImportPw]=useState(""); const [importMsg, setImportMsg]=useState(""); const [importErr, setImportErr]=useState("");
+function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, colorSchemeId, customScheme,
+  onTermThemeChange, onCustomTermColor, onColorSchemeChange, onCustomSchemeColor,
+  onClose, onRefresh, on2FAChange, ssoEnabled, onWiped }) {
+  const [cur,setCur]=useState(""); const [nw,setNw]=useState(""); const [nw2,setNw2]=useState("");
+  const [pwMsg,setPwMsg]=useState(""); const [pwErr,setPwErr]=useState("");
+  const [exportPw,setExportPw]=useState(""); const [exportMsg,setExportMsg]=useState(""); const [exportErr,setExportErr]=useState("");
+  const [importFile,setImportFile]=useState(null); const [importPw,setImportPw]=useState(""); const [importMsg,setImportMsg]=useState(""); const [importErr,setImportErr]=useState("");
 
   async function changePw() {
     setPwErr(""); setPwMsg("");
@@ -1030,26 +919,17 @@ function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, onThemeChan
     try{await api.changeMasterPassword(cur,nw);setPwMsg("Password changed.");setCur("");setNw("");setNw2("");}
     catch(e){setPwErr(e.message);}
   }
-
   async function handleExport() {
     setExportErr(""); setExportMsg("");
-    try{
-      const blob=await api.exportData(exportPw);
-      const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`ssh-manager-${Date.now()}.sshm`; a.click();
-      URL.revokeObjectURL(a.href); setExportMsg("Export downloaded."); setExportPw("");
-    }catch(e){setExportErr(e.message);}
+    try{ const blob=await api.exportData(exportPw); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`ssh-manager-${Date.now()}.sshm`; a.click(); URL.revokeObjectURL(a.href); setExportMsg("Export downloaded."); setExportPw(""); }
+    catch(e){setExportErr(e.message);}
   }
-
   async function handleImport() {
     setImportErr(""); setImportMsg("");
     if(!importFile) return setImportErr("Select a file first");
-    try{
-      const result=await api.importData(await importFile.text(),importPw);
-      setImportMsg(`Imported ${result.imported} hosts (${result.skipped} skipped), ${result.snippetsImported} snippets.`);
-      setImportPw(""); setImportFile(null); onRefresh();
-    }catch(e){setImportErr(e.message);}
+    try{ const result=await api.importData(await importFile.text(),importPw); setImportMsg(`Imported ${result.imported} hosts (${result.skipped} skipped), ${result.snippetsImported} snippets.`); setImportPw(""); setImportFile(null); onRefresh(); }
+    catch(e){setImportErr(e.message);}
   }
-
   async function wipe() {
     if(!confirm("Delete ALL data and reset vault?")) return;
     if(!confirm("Really sure?")) return;
@@ -1061,12 +941,50 @@ function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, onThemeChan
       <div className="card modal" onClick={(e)=>e.stopPropagation()}>
         <div className="modal-head"><h2>Settings</h2><button className="btn btn-small btn-ghost" onClick={onClose}>✕</button></div>
 
+        {/* ---------- 2FA ---------- */}
         <h3>Two-Factor Authentication</h3>
         <p className="small muted">Works with any TOTP app: Google Authenticator, Authy, Microsoft Authenticator, Bitwarden, 1Password, KeePass.</p>
-        {twoFAEnabled
-          ? <TwoFADisable onDisabled={()=>on2FAChange(false)}/>
-          : <TwoFASetup   onEnabled={()=>on2FAChange(true)}/>}
+        {twoFAEnabled ? <TwoFADisable onDisabled={()=>on2FAChange(false)}/> : <TwoFASetup onEnabled={()=>on2FAChange(true)}/>}
 
+        {/* ---------- SSO info ---------- */}
+        {ssoEnabled && (<>
+          <div className="divider"/>
+          <h3>Single Sign-On</h3>
+          <p className="small muted">SSO is enabled on this instance. Authentication is managed by your SSO provider. To sign out, use the "Sign out" button in the top bar.</p>
+        </>)}
+
+        {/* ---------- UI Color Scheme ---------- */}
+        <div className="divider"/>
+        <h3>UI Color Scheme</h3>
+        <div className="scheme-grid">
+          {Object.entries(COLOR_SCHEMES).filter(([id])=>id!=="custom").map(([id,s])=>(
+            <button key={id}
+              className={"scheme-swatch"+(colorSchemeId===id?" selected":"")}
+              style={{background:s.accent,color:"#fff",border:`2px solid ${colorSchemeId===id?"#fff":"transparent"}`}}
+              onClick={()=>onColorSchemeChange(id)}>
+              {s.name}
+            </button>
+          ))}
+          <button
+            className={"scheme-swatch"+(colorSchemeId==="custom"?" selected":"")}
+            style={{background:customScheme.accent,color:"#fff",border:`2px solid ${colorSchemeId==="custom"?"#fff":"transparent"}`}}
+            onClick={()=>onColorSchemeChange("custom")}>
+            Custom
+          </button>
+        </div>
+        {colorSchemeId==="custom"&&(
+          <div className="custom-colors">
+            {[["accent","Accent (main)"],["accentLight","Accent (light)"],["tabBase","Tab base"]].map(([k,label])=>(
+              <label key={k} className="color-row">
+                <span className="small">{label}</span>
+                <input type="color" value={customScheme[k]||"#3A336B"} onChange={(e)=>onCustomSchemeColor(k,e.target.value)}/>
+                <span className="small muted">{customScheme[k]}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {/* ---------- Terminal Theme ---------- */}
         <div className="divider"/>
         <h3>Terminal Theme</h3>
         <div className="theme-grid">
@@ -1074,14 +992,14 @@ function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, onThemeChan
             <button key={id}
               className={"theme-swatch"+(termThemeId===id?" selected":"")}
               style={{background:t.theme.background,color:t.theme.foreground,border:`2px solid ${termThemeId===id?"#8f86d4":"transparent"}`}}
-              onClick={()=>onThemeChange(id)}>
+              onClick={()=>onTermThemeChange(id)}>
               {t.name}
             </button>
           ))}
           <button
             className={"theme-swatch"+(termThemeId==="custom"?" selected":"")}
             style={{background:customTermTheme.background,color:customTermTheme.foreground,border:`2px solid ${termThemeId==="custom"?"#8f86d4":"transparent"}`}}
-            onClick={()=>onThemeChange("custom")}>
+            onClick={()=>onTermThemeChange("custom")}>
             Custom
           </button>
         </div>
@@ -1090,7 +1008,7 @@ function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, onThemeChan
             {[["background","Background"],["foreground","Foreground"],["cursor","Cursor"],["selectionBackground","Selection"]].map(([k,label])=>(
               <label key={k} className="color-row">
                 <span className="small">{label}</span>
-                <input type="color" value={customTermTheme[k]||"#000000"} onChange={(e)=>onCustomColor(k,e.target.value)}/>
+                <input type="color" value={customTermTheme[k]||"#000000"} onChange={(e)=>onCustomTermColor(k,e.target.value)}/>
                 <span className="small muted">{customTermTheme[k]}</span>
               </label>
             ))}
@@ -1099,9 +1017,9 @@ function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, onThemeChan
 
         <div className="divider"/>
         <h3>Change master password</h3>
-        <input type="password" placeholder="Current password"     value={cur} onChange={(e)=>setCur(e.target.value)}/>
-        <input type="password" placeholder="New password (min 8)" value={nw}  onChange={(e)=>setNw(e.target.value)}/>
-        <input type="password" placeholder="Repeat new password"  value={nw2} onChange={(e)=>setNw2(e.target.value)}/>
+        <input type="password" placeholder="Current password" value={cur} onChange={(e)=>setCur(e.target.value)}/>
+        <input type="password" placeholder="New password (min 8)" value={nw} onChange={(e)=>setNw(e.target.value)}/>
+        <input type="password" placeholder="Repeat new password" value={nw2} onChange={(e)=>setNw2(e.target.value)}/>
         <button className="btn" onClick={changePw}>Change password</button>
         {pwMsg&&<p className="success">{pwMsg}</p>}
         {pwErr&&<p className="error">{pwErr}</p>}
@@ -1132,74 +1050,35 @@ function SettingsModal({ twoFAEnabled, termThemeId, customTermTheme, onThemeChan
 }
 
 function TwoFASetup({ onEnabled }) {
-  const [step,      setStep]      = useState(1);
-  const [qrDataUrl, setQrDataUrl] = useState("");
-  const [manualKey, setManualKey] = useState("");
-  const [token,     setToken]     = useState("");
-  const [error,     setError]     = useState("");
-  const [loading,   setLoading]   = useState(false);
+  const [step,setStep]=useState(1); const [qrDataUrl,setQrDataUrl]=useState(""); const [manualKey,setManualKey]=useState("");
+  const [token,setToken]=useState(""); const [error,setError]=useState(""); const [loading,setLoading]=useState(false);
 
-  async function startSetup() {
-    setError(""); setLoading(true);
-    try { const d=await api.setup2FA(); setQrDataUrl(d.qrDataUrl); setManualKey(d.manualKey); setStep(2); }
-    catch(e){ setError(e.message); }
-    finally { setLoading(false); }
-  }
+  async function startSetup() { setError("");setLoading(true); try{const d=await api.setup2FA();setQrDataUrl(d.qrDataUrl);setManualKey(d.manualKey);setStep(2);}catch(e){setError(e.message);}finally{setLoading(false);} }
+  async function confirmSetup() { setError("");setLoading(true); try{await api.confirm2FA(token);setStep(3);onEnabled();}catch(e){setError(e.message);}finally{setLoading(false);} }
+  const formatted=manualKey.match(/.{1,4}/g)?.join(" ")||manualKey;
 
-  async function confirmSetup() {
-    setError(""); setLoading(true);
-    try { await api.confirm2FA(token); setStep(3); onEnabled(); }
-    catch(e){ setError(e.message); }
-    finally { setLoading(false); }
-  }
-
-  const formatted = manualKey.match(/.{1,4}/g)?.join(" ") || manualKey;
-
-  if (step===1) return (
+  if(step===1) return (<div className="twofa-section"><p className="small muted">2FA is currently <b>disabled</b>.</p><button className="btn" onClick={startSetup} disabled={loading}>{loading?"Generating…":"Set up 2FA"}</button>{error&&<p className="error">{error}</p>}</div>);
+  if(step===2) return (
     <div className="twofa-section">
-      <p className="small muted">2FA is currently <b>disabled</b>. Enable it to require a 6-digit code on every unlock.</p>
-      <button className="btn" onClick={startSetup} disabled={loading}>{loading?"Generating…":"Set up 2FA"}</button>
-      {error&&<p className="error">{error}</p>}
-    </div>
-  );
-
-  if (step===2) return (
-    <div className="twofa-section">
-      <p className="small muted">Scan this QR code with your authenticator app, then enter the 6-digit code to confirm.</p>
+      <p className="small muted">Scan this QR code, then enter the 6-digit code to confirm.</p>
       {qrDataUrl&&<img src={qrDataUrl} alt="2FA QR code" className="qr-code"/>}
       <p className="small muted">Can't scan? Enter this key manually:</p>
       <div className="manual-key">{formatted}</div>
-      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6}
-        placeholder="6-digit code" value={token} className="totp-input" autoFocus
-        onChange={(e)=>setToken(e.target.value.replace(/\D/g,""))}
-        onKeyDown={(e)=>e.key==="Enter"&&confirmSetup()}/>
+      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="6-digit code" value={token} className="totp-input" autoFocus onChange={(e)=>setToken(e.target.value.replace(/\D/g,""))} onKeyDown={(e)=>e.key==="Enter"&&confirmSetup()}/>
       <button className="btn" onClick={confirmSetup} disabled={loading||token.length!==6}>{loading?"Verifying…":"Enable 2FA"}</button>
       {error&&<p className="error">{error}</p>}
     </div>
   );
-
   return <div className="twofa-section"><p className="success">✓ 2FA enabled successfully!</p></div>;
 }
 
 function TwoFADisable({ onDisabled }) {
-  const [token,   setToken]   = useState("");
-  const [error,   setError]   = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function disable() {
-    setError(""); setLoading(true);
-    try { await api.disable2FA(token); onDisabled(); }
-    catch(e){ setError(e.message); }
-    finally { setLoading(false); }
-  }
-
+  const [token,setToken]=useState(""); const [error,setError]=useState(""); const [loading,setLoading]=useState(false);
+  async function disable() { setError("");setLoading(true); try{await api.disable2FA(token);onDisabled();}catch(e){setError(e.message);}finally{setLoading(false);} }
   return (
     <div className="twofa-section">
       <p className="small muted">2FA is currently <b style={{color:"#4ecb71"}}>enabled</b>. Enter your current authenticator code to disable it.</p>
-      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6}
-        placeholder="6-digit code" value={token} className="totp-input"
-        onChange={(e)=>setToken(e.target.value.replace(/\D/g,""))}
-        onKeyDown={(e)=>e.key==="Enter"&&disable()}/>
+      <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="6-digit code" value={token} className="totp-input" onChange={(e)=>setToken(e.target.value.replace(/\D/g,""))} onKeyDown={(e)=>e.key==="Enter"&&disable()}/>
       <button className="btn btn-danger" onClick={disable} disabled={loading||token.length!==6}>{loading?"Disabling…":"Disable 2FA"}</button>
       {error&&<p className="error">{error}</p>}
     </div>

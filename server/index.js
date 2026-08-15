@@ -4,6 +4,7 @@ const dgram     = require("dgram");
 const crypto    = require("crypto");
 const QRCode    = require("qrcode");
 const rateLimit = require("express-rate-limit");
+const session   = require("express-session");
 const { WebSocketServer } = require("ws");
 const { Client } = require("ssh2");
 const db        = require("./db");
@@ -14,8 +15,13 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 const server = http.createServer(app);
 
-// ---------- Session token ----------
-let sessionToken = null;
+// ---------- Session (needed for SSO state) ----------
+app.use(session({
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 },
+}));
 
 // ---------- Security headers ----------
 app.use((req, res, next) => {
@@ -29,20 +35,114 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---------- Trust proxy ----------
 app.set("trust proxy", false);
 
 // ---------- Rate limiter ----------
 const unlockLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000, max: 10,
+  standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many unlock attempts. Try again in 15 minutes." },
+});
+
+// ---------- Session token (vault) ----------
+let sessionToken = null;
+
+// ---------- SSO (optional OIDC) ----------
+const ssoEnabled = process.env.SSO_ENABLED === "true";
+let ssoClient    = null;
+
+if (ssoEnabled) {
+  const { Issuer } = require("openid-client");
+  (async () => {
+    try {
+      const issuer = await Issuer.discover(process.env.SSO_ISSUER);
+      ssoClient = new issuer.Client({
+        client_id:     process.env.SSO_CLIENT_ID,
+        client_secret: process.env.SSO_CLIENT_SECRET || undefined,
+        redirect_uris: [process.env.SSO_REDIRECT_URI || "http://localhost:3000/auth/callback"],
+        response_types: ["code"],
+      });
+      console.log(`SSO enabled — issuer: ${issuer.issuer}`);
+    } catch (e) {
+      console.error("SSO init failed:", e.message);
+    }
+  })();
+}
+
+// ---------- SSO routes (public) ----------
+app.get("/api/auth/status", (req, res) => {
+  res.json({
+    ssoEnabled,
+    ssoAuthenticated: !ssoEnabled || !!req.session?.ssoAuthenticated,
+    ssoUser: req.session?.ssoUser || null,
+  });
+});
+
+app.get("/auth/login", (req, res) => {
+  if (!ssoEnabled || !ssoClient) return res.redirect("/");
+  const state = crypto.randomBytes(16).toString("hex");
+  const nonce = crypto.randomBytes(16).toString("hex");
+  req.session.ssoState = { state, nonce };
+  const url = ssoClient.authorizationUrl({ scope: "openid profile email", state, nonce });
+  res.redirect(url);
+});
+
+app.get("/auth/callback", async (req, res) => {
+  if (!ssoEnabled || !ssoClient) return res.redirect("/");
+  const { state, nonce } = req.session.ssoState || {};
+  if (!state) return res.status(400).send("Invalid session state — try signing in again.");
+  try {
+    const params   = ssoClient.callbackParams(req);
+    const tokenSet = await ssoClient.callback(
+      process.env.SSO_REDIRECT_URI || "http://localhost:3000/auth/callback",
+      params, { state, nonce }
+    );
+    const claims = tokenSet.claims();
+
+    // Optional role/group restriction
+    if (process.env.SSO_ALLOWED_ROLES) {
+      const roles = [
+        ...(claims.groups || []),
+        ...(claims.realm_access?.roles || []),
+        ...(claims.roles || []),
+        ...(claims.resource_access?.[process.env.SSO_CLIENT_ID]?.roles || []),
+      ];
+      const allowed = process.env.SSO_ALLOWED_ROLES.split(",").map((r) => r.trim());
+      if (!allowed.some((r) => roles.includes(r))) {
+        return res.status(403).send("Access denied — your account does not have the required role.");
+      }
+    }
+
+    req.session.ssoAuthenticated = true;
+    req.session.ssoUser = {
+      name:  claims.name || claims.preferred_username || claims.email || "User",
+      email: claims.email || null,
+    };
+    delete req.session.ssoState;
+    res.redirect("/");
+  } catch (e) {
+    console.error("SSO callback error:", e.message);
+    res.status(500).send("SSO authentication failed: " + e.message);
+  }
+});
+
+app.get("/auth/logout", (req, res) => {
+  const endSession = ssoClient?.issuer?.end_session_endpoint;
+  req.session.destroy();
+  if (endSession) {
+    const postLogout = encodeURIComponent(
+      (process.env.SSO_REDIRECT_URI || "http://localhost:3000/auth/callback").replace("/auth/callback", "/")
+    );
+    res.redirect(`${endSession}?post_logout_redirect_uri=${postLogout}`);
+  } else {
+    res.redirect("/");
+  }
 });
 
 // ---------- Helpers ----------
 function requireAccess(req, res, next) {
+  if (ssoEnabled && !req.session?.ssoAuthenticated)
+    return res.status(401).json({ error: "SSO authentication required", ssoRequired: true });
   const t = req.headers["x-session-token"];
   if (!sessionToken || t !== sessionToken)
     return res.status(401).json({ error: "Unauthorized" });
@@ -80,8 +180,7 @@ app.get("/api/vault/status", (req, res) => {
 app.post("/api/vault/setup", async (req, res) => {
   if (vault.isSetUp()) return res.status(400).json({ error: "Already set up" });
   const { password } = req.body;
-  if (!password || password.length < 8)
-    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  if (!password || password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
   await vault.setup(password);
   sessionToken = crypto.randomBytes(32).toString("hex");
   res.json({ ok: true, token: sessionToken });
@@ -104,8 +203,7 @@ app.post("/api/vault/lock", requireAccess, (req, res) => {
 
 app.post("/api/vault/change-password", requireAccess, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
-  if (!newPassword || newPassword.length < 8)
-    return res.status(400).json({ error: "New password must be at least 8 characters" });
+  if (!newPassword || newPassword.length < 8) return res.status(400).json({ error: "New password must be at least 8 characters" });
   const ok = await vault.changeMasterPassword(currentPassword || "", newPassword);
   if (!ok) return res.status(401).json({ error: "Current password is wrong" });
   res.json({ ok: true });
@@ -136,7 +234,7 @@ app.post("/api/vault/2fa/confirm", requireAccess, (req, res) => {
 
 app.post("/api/vault/2fa/disable", requireAccess, (req, res) => {
   const { token } = req.body;
-  if (!token) return res.status(400).json({ error: "Current authenticator code required to disable 2FA" });
+  if (!token) return res.status(400).json({ error: "Current authenticator code required" });
   const ok = vault.disable2FA(token);
   if (!ok) return res.status(401).json({ error: "Invalid code" });
   res.json({ ok: true });
@@ -236,8 +334,8 @@ app.put("/api/hosts/:id", requireAccess, (req, res) => {
   const host = db.prepare("SELECT * FROM hosts WHERE id=?").get(req.params.id);
   if (!host) return res.status(404).json({ error: "Host not found" });
   const { name, hostname, port, username, password, clearPassword, folder_id, tags, favorite, notes, auth_type, private_key, key_passphrase, clearKey, mac_address } = req.body;
-  let enc   = host.enc_password;    if (clearPassword) enc   = null; else if (password)      enc   = vault.encrypt(password);
-  let encK  = host.enc_private_key; if (clearKey)      encK  = null; else if (private_key)   encK  = vault.encrypt(private_key);
+  let enc   = host.enc_password;    if (clearPassword) enc   = null; else if (password)     enc   = vault.encrypt(password);
+  let encK  = host.enc_private_key; if (clearKey)      encK  = null; else if (private_key)  encK  = vault.encrypt(private_key);
   let encKp = host.key_passphrase;  if (key_passphrase !== undefined) encKp = key_passphrase ? vault.encrypt(key_passphrase) : null;
   db.prepare(
     "UPDATE hosts SET name=?,hostname=?,port=?,username=?,enc_password=?,folder_id=?,tags=?,favorite=?,notes=?,auth_type=?,enc_private_key=?,key_passphrase=?,mac_address=? WHERE id=?"
@@ -260,10 +358,7 @@ app.post  ("/api/snippet-folders",     requireAccess, (req, res) => {
   if (!name) return res.status(400).json({ error: "name is required" });
   res.json({ id: db.prepare("INSERT INTO snippet_folders (name) VALUES (?)").run(name).lastInsertRowid });
 });
-app.put   ("/api/snippet-folders/:id", requireAccess, (req, res) => {
-  db.prepare("UPDATE snippet_folders SET name=? WHERE id=?").run(req.body.name, req.params.id);
-  res.json({ ok: true });
-});
+app.put   ("/api/snippet-folders/:id", requireAccess, (req, res) => { db.prepare("UPDATE snippet_folders SET name=? WHERE id=?").run(req.body.name, req.params.id); res.json({ ok: true }); });
 app.delete("/api/snippet-folders/:id", requireAccess, (req, res) => {
   db.prepare("UPDATE snippets SET folder_id=NULL WHERE folder_id=?").run(req.params.id);
   db.prepare("DELETE FROM snippet_folders WHERE id=?").run(req.params.id);
@@ -274,32 +369,23 @@ app.delete("/api/snippet-folders/:id", requireAccess, (req, res) => {
 app.get("/api/snippets", requireAccess, (req, res) =>
   res.json(db.prepare("SELECT * FROM snippets ORDER BY favorite DESC, name ASC").all())
 );
-
 app.post("/api/snippets", requireAccess, (req, res) => {
   const { name, command, folder_id, favorite } = req.body;
   if (!name || !command) return res.status(400).json({ error: "name and command are required" });
-  res.json({
-    id: db.prepare("INSERT INTO snippets (name,command,folder_id,favorite) VALUES (?,?,?,?)")
-      .run(name, command, folder_id || null, favorite ? 1 : 0).lastInsertRowid
-  });
+  res.json({ id: db.prepare("INSERT INTO snippets (name,command,folder_id,favorite) VALUES (?,?,?,?)").run(name, command, folder_id||null, favorite?1:0).lastInsertRowid });
 });
-
 app.put("/api/snippets/:id", requireAccess, (req, res) => {
   const s = db.prepare("SELECT * FROM snippets WHERE id=?").get(req.params.id);
   if (!s) return res.status(404).json({ error: "Snippet not found" });
   const { name, command, folder_id, favorite } = req.body;
   db.prepare("UPDATE snippets SET name=?,command=?,folder_id=?,favorite=? WHERE id=?")
-    .run(name ?? s.name, command ?? s.command,
-      folder_id === undefined ? s.folder_id : folder_id || null,
-      favorite === undefined ? s.favorite : favorite ? 1 : 0,
+    .run(name??s.name, command??s.command,
+      folder_id===undefined ? s.folder_id : folder_id||null,
+      favorite===undefined  ? s.favorite  : favorite?1:0,
       req.params.id);
   res.json({ ok: true });
 });
-
-app.delete("/api/snippets/:id", requireAccess, (req, res) => {
-  db.prepare("DELETE FROM snippets WHERE id=?").run(req.params.id);
-  res.json({ ok: true });
-});
+app.delete("/api/snippets/:id", requireAccess, (req, res) => { db.prepare("DELETE FROM snippets WHERE id=?").run(req.params.id); res.json({ ok: true }); });
 
 // ---------- WebSocket Terminal ----------
 const wss = new WebSocketServer({ server, path: "/ws" });
@@ -309,7 +395,6 @@ wss.on("connection", (ws, req) => {
   const hostId = url.searchParams.get("hostId");
   const send   = (data) => ws.send(JSON.stringify({ type: "data", data }));
 
-  // Auth via first message — keeps token out of server logs
   ws.once("message", (authRaw) => {
     let authMsg;
     try { authMsg = JSON.parse(authRaw); } catch { send("\r\nBad auth.\r\n"); return ws.close(); }
@@ -345,11 +430,10 @@ wss.on("connection", (ws, req) => {
             prevCpu = { total, idle };
             const mem  = lines[1].trim().split(/\s+/);
             const dsk  = lines[2].trim().split(/\s+/);
-            const user = (lines[3] || "").trim();
+            const user = (lines[3]||"").trim();
             if (ws.readyState === ws.OPEN)
               ws.send(JSON.stringify({ type:"stats", ping, cpu,
-                memUsed:  Number(mem[1]) - Number(mem[6] ?? mem[3]),
-                memTotal: Number(mem[1]),
+                memUsed: Number(mem[1])-Number(mem[6]??mem[3]), memTotal: Number(mem[1]),
                 diskUsed: Number(dsk[0]), diskTotal: Number(dsk[1]), user }));
           } catch {}
         });
@@ -359,8 +443,8 @@ wss.on("connection", (ws, req) => {
     ws.on("message", (raw) => {
       let msg; try { msg = JSON.parse(raw); } catch { return; }
       if (msg.type === "resize") {
-        const cols = Math.max(1, Math.min(500, parseInt(msg.cols) || 80));
-        const rows = Math.max(1, Math.min(200, parseInt(msg.rows) || 24));
+        const cols = Math.max(1, Math.min(500, parseInt(msg.cols)||80));
+        const rows = Math.max(1, Math.min(200, parseInt(msg.rows)||24));
         lastSize = { cols, rows };
         if (stream) stream.setWindow(rows, cols, 0, 0);
       }
@@ -372,10 +456,10 @@ wss.on("connection", (ws, req) => {
         send(text); let buf = "";
         promptHandler = (data) => {
           for (const ch of data) {
-            if (ch === "\r") { send("\r\n"); promptHandler = null; return resolve(buf); }
-            if (ch === "\x7f") { if (buf.length > 0) { buf = buf.slice(0, -1); if (echo) send("\b \b"); } continue; }
-            if (ch < " ") continue;
-            buf += ch; if (echo) send(ch);
+            if (ch==="\r") { send("\r\n"); promptHandler=null; return resolve(buf); }
+            if (ch==="\x7f") { if(buf.length>0){buf=buf.slice(0,-1);if(echo)send("\b \b");} continue; }
+            if (ch<" ") continue;
+            buf+=ch; if(echo) send(ch);
           }
         };
       });
@@ -384,18 +468,18 @@ wss.on("connection", (ws, req) => {
     ws.on("close", () => { if (statsTimer) clearInterval(statsTimer); ssh.end(); });
 
     ssh.on("ready", () => {
-      ssh.shell({ term: "xterm-256color", cols: lastSize.cols, rows: lastSize.rows }, (err, s) => {
+      ssh.shell({ term:"xterm-256color", cols:lastSize.cols, rows:lastSize.rows }, (err, s) => {
         if (err) { send(`\r\nError: ${err.message}\r\n`); return ws.close(); }
         stream = s;
         stream.setWindow(lastSize.rows, lastSize.cols, 0, 0);
-        ws.send(JSON.stringify({ type: "status", status: "connected" }));
+        ws.send(JSON.stringify({ type:"status", status:"connected" }));
         db.prepare("UPDATE hosts SET last_connected_at=datetime('now') WHERE id=?").run(host.id);
         statsTimer = setInterval(pollStats, 5000);
         pollStats();
         stream.on("data",  (chunk) => send(chunk.toString("utf8")));
         stream.on("close", () => {
           if (statsTimer) clearInterval(statsTimer);
-          ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
+          ws.send(JSON.stringify({ type:"status", status:"disconnected" }));
           ssh.end(); ws.close();
         });
       });
@@ -403,7 +487,7 @@ wss.on("connection", (ws, req) => {
 
     ssh.on("error", (err) => {
       send(`\r\nSSH error: ${err.message}\r\n`);
-      ws.send(JSON.stringify({ type: "status", status: "disconnected" }));
+      ws.send(JSON.stringify({ type:"status", status:"disconnected" }));
       ws.close();
     });
 
@@ -417,24 +501,20 @@ wss.on("connection", (ws, req) => {
       let username = host.username;
       if (!username) username = await prompt("login as: ");
       send(`Connecting to ${host.hostname}:${host.port}...\r\n`);
-
-      const opts = { host: host.hostname, port: host.port, username, tryKeyboard: true };
-
+      const opts = { host:host.hostname, port:host.port, username, tryKeyboard:true };
       if (host.auth_type === "key") {
         if (!host.enc_private_key) { send("\r\nNo private key stored.\r\n"); return ws.close(); }
         try { opts.privateKey = vault.decrypt(host.enc_private_key); } catch { send("\r\nFailed to decrypt key.\r\n"); return ws.close(); }
         if (host.key_passphrase) { try { opts.passphrase = vault.decrypt(host.key_passphrase); } catch {} }
-        else { const pp = await prompt("Key passphrase (Enter if none): ", false); if (pp) opts.passphrase = pp; }
+        else { const pp = await prompt("Key passphrase (Enter if none): ", false); if(pp) opts.passphrase=pp; }
       } else {
         if (host.enc_password) { try { opts.password = vault.decrypt(host.enc_password); } catch { send("\r\nFailed to decrypt password.\r\n"); return ws.close(); } }
         else opts.password = await prompt(`${username}@${host.hostname}'s password: `, false);
       }
-
       ssh.connect(opts);
     })();
-
-  }); // closes ws.once("message")
-}); // closes wss.on("connection")
+  });
+});
 
 if (process.env.NODE_ENV === "production") {
   const path = require("path");

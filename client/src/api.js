@@ -31,6 +31,7 @@ export const api = {
       window.dispatchEvent(new CustomEvent("vault-locked"));
     }
   },
+  authStatus: () => fetch("/api/auth/status").then((r) => r.json()),
 
   getSessionToken: () => sessionStorage.getItem("session-token") || "",
 

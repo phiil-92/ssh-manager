@@ -122,7 +122,7 @@ html, body, #root { height: 100%; background: var(--bg); color: var(--text); fon
   white-space: nowrap; color: rgba(228,226,240,.6);
   user-select: none; touch-action: none;
   transition: transform .15s ease;
-  background: #2B2652;
+  background: var(--tab-base, #2B2652);
 }
 .tab:hover { background: rgba(58,51,107,.5); }
 .tab.shown  { background: #3d3577; color: #fff; }
@@ -466,3 +466,23 @@ input:focus, select:focus { outline: none; border-color: var(--accent-light); }
 [data-theme="light"] .theme-swatch { border-color: rgba(58,51,107,.2); }
 [data-theme="light"] .sb-log-btn { background: rgba(58,51,107,.08); color: #26233a; }
 [data-theme="light"] .sb-log-btn:hover { background: var(--accent); color: #fff; }
+
+/* ---------- color scheme swatches ---------- */
+.scheme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 6px;
+}
+.scheme-swatch {
+  padding: 8px 6px; border-radius: 6px; cursor: pointer;
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600;
+  transition: transform .1s; border: 2px solid transparent;
+}
+.scheme-swatch:hover { transform: scale(1.05); }
+.scheme-swatch.selected { box-shadow: 0 0 0 2px #fff; }
+
+/* ---------- tab base color (scheme-aware) ---------- */
+.tab { background: var(--tab-base, #2B2652); }
+
+/* ---------- SSO user in topbar ---------- */
+.sso-user { padding: 4px 8px; border-radius: 4px; background: rgba(255,255,255,.1); }
