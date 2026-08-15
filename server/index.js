@@ -118,13 +118,16 @@ app.get("/auth/callback", async (req, res) => {
       }
     }
 
-    req.session.ssoAuthenticated = true;
+     req.session.ssoAuthenticated = true;
     req.session.ssoUser = {
       name:  claims.name || claims.preferred_username || claims.email || "User",
       email: claims.email || null,
     };
     delete req.session.ssoState;
-    res.redirect("/");
+    req.session.save((err) => {
+      if (err) console.error("Session save error:", err);
+      res.redirect("/");
+    });
   } catch (e) {
     console.error("SSO callback error:", e.message);
     res.status(500).send("SSO authentication failed: " + e.message);
