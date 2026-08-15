@@ -20,7 +20,12 @@ app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
   resave: false,
   saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 },
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: 24 * 60 * 60 * 1000,
+    secure: process.env.NODE_ENV === "production",
+  },
 }));
 
 // ---------- Security headers ----------
@@ -35,7 +40,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.set("trust proxy", false);
+app.set("trust proxy", 1);
 
 // ---------- Rate limiter ----------
 const unlockLimiter = rateLimit({
