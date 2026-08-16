@@ -42,7 +42,17 @@ app.use((req, res, next) => {
 
 app.set("trust proxy", 1);
 
-// ---------- Rate limiter ----------
+// ---------- Rate limiters ----------
+// General limiter - all routes
+const generalLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 120,                 // 120 requests per minute per IP
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many requests. Please slow down." },
+});
+app.use(generalLimiter);
+
+// Strict limiter - vault unlock only
 const unlockLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 10,
   standardHeaders: true, legacyHeaders: false,
