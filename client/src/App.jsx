@@ -846,7 +846,7 @@ function SnippetRow({ snippet:s, hasActive, onSend, onEdit, onChanged, onDragSta
   return (
     <li className={"snippet-item"+(hasActive?"":" disabled")} draggable onDragStart={(e)=>{e.dataTransfer.effectAllowed="move";onDragStart(s.id);}} onDragEnd={onDragEnd}>
       <div className="snippet-name-row">
-        <span className="snippet-name" style={{color:"#8f86d4",opacity:1}} title={hasActive?"Click to run":"Open a session first"} onClick={()=>hasActive&&onSend(s.command+"\r")}>
+        <span className="snippet-name" style={{color: "var(--accent-light)", opacity: 1}} title={hasActive?"Click to run":"Open a session first"} onClick={()=>hasActive&&onSend(s.command+"\r")}>
           {!!s.favorite&&<span className="star-badge">★</span>}{s.name}
         </span>
       </div>
