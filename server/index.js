@@ -24,7 +24,7 @@ app.use(session({
     httpOnly: true,
     sameSite: "lax",
     maxAge: 24 * 60 * 60 * 1000,
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.SECURE_COOKIES === "true",
   },
 }));
 
@@ -43,16 +43,14 @@ app.use((req, res, next) => {
 app.set("trust proxy", 1);
 
 // ---------- Rate limiters ----------
-// General limiter - all routes
 const generalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 120,                 // 120 requests per minute per IP
+  windowMs: 1 * 60 * 1000,
+  max: 120,
   standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many requests. Please slow down." },
 });
 app.use(generalLimiter);
 
-// Strict limiter - vault unlock only
 const unlockLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 10,
   standardHeaders: true, legacyHeaders: false,
@@ -72,9 +70,9 @@ if (ssoEnabled) {
     try {
       const issuer = await Issuer.discover(process.env.SSO_ISSUER);
       ssoClient = new issuer.Client({
-        client_id:     process.env.SSO_CLIENT_ID,
-        client_secret: process.env.SSO_CLIENT_SECRET || undefined,
-        redirect_uris: [process.env.SSO_REDIRECT_URI || "http://localhost:3000/auth/callback"],
+        client_id:      process.env.SSO_CLIENT_ID,
+        client_secret:  process.env.SSO_CLIENT_SECRET || undefined,
+        redirect_uris:  [process.env.SSO_REDIRECT_URI || "http://localhost:3000/auth/callback"],
         response_types: ["code"],
       });
       console.log(`SSO enabled — issuer: ${issuer.issuer}`);
@@ -94,12 +92,18 @@ app.get("/api/auth/status", (req, res) => {
 });
 
 app.get("/auth/login", (req, res) => {
-  if (!ssoEnabled || !ssoClient) return res.redirect("/");
+  if (!ssoEnabled || !ssoClient) {
+    return res.status(503).send("SSO is not configured correctly — check server logs.");
+  }
   const state = crypto.randomBytes(16).toString("hex");
   const nonce = crypto.randomBytes(16).toString("hex");
   req.session.ssoState = { state, nonce };
-  const url = ssoClient.authorizationUrl({ scope: "openid profile email", state, nonce });
-  res.redirect(url);
+  // Save session BEFORE redirecting to Keycloak so state is persisted
+  req.session.save((err) => {
+    if (err) console.error("Session save error on login:", err);
+    const url = ssoClient.authorizationUrl({ scope: "openid profile email", state, nonce });
+    res.redirect(url);
+  });
 });
 
 app.get("/auth/callback", async (req, res) => {
@@ -128,14 +132,16 @@ app.get("/auth/callback", async (req, res) => {
       }
     }
 
-     req.session.ssoAuthenticated = true;
+    req.session.ssoAuthenticated = true;
+    req.session.ssoIdToken = tokenSet.id_token;
     req.session.ssoUser = {
       name:  claims.name || claims.preferred_username || claims.email || "User",
       email: claims.email || null,
     };
     delete req.session.ssoState;
+    // Save session BEFORE redirecting back to app
     req.session.save((err) => {
-      if (err) console.error("Session save error:", err);
+      if (err) console.error("Session save error on callback:", err);
       res.redirect("/");
     });
   } catch (e) {
@@ -146,15 +152,20 @@ app.get("/auth/callback", async (req, res) => {
 
 app.get("/auth/logout", (req, res) => {
   const endSession = ssoClient?.issuer?.end_session_endpoint;
-  req.session.destroy();
-  if (endSession) {
-    const postLogout = encodeURIComponent(
-      (process.env.SSO_REDIRECT_URI || "http://localhost:3000/auth/callback").replace("/auth/callback", "/")
-    );
-    res.redirect(`${endSession}?post_logout_redirect_uri=${postLogout}`);
-  } else {
-    res.redirect("/");
-  }
+  const idToken    = req.session?.ssoIdToken;
+  const postLogout = process.env.SSO_POST_LOGOUT_URI ||
+  (process.env.SSO_REDIRECT_URI || "http://localhost:3000/auth/callback")
+  .replace("/auth/callback", "/");
+
+  req.session.destroy(() => {
+    if (endSession) {
+      const params = new URLSearchParams({ post_logout_redirect_uri: postLogout });
+      if (idToken) params.set("id_token_hint", idToken);
+      res.redirect(`${endSession}?${params.toString()}`);
+    } else {
+      res.redirect("/");
+    }
+  });
 });
 
 // ---------- Helpers ----------
