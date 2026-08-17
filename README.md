@@ -63,6 +63,7 @@ services:
       # - SSO_CLIENT_ID=ssh-manager
       # - SSO_CLIENT_SECRET=your-client-secret
       # - SSO_REDIRECT_URI=http://your-server:3000/auth/callback
+      # - SSO_POST_LOGOUT_URI=http://your-server:3000/
       # - SSO_ALLOWED_ROLES=ssh-manager-users  # optional: restrict by role/group
       # - SESSION_SECRET=change-this-to-a-long-random-string
       # - SECURE_COOKIES=true  # set to true when using HTTPS behind a reverse proxy
