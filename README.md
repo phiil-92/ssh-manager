@@ -2,7 +2,7 @@
 
 ![preview](https://i.ibb.co/LzLy3GYc/fil22.png)
 
-## v1.0.0
+## v1.1.0
 
 ### Feature list
 - Credential store
