@@ -11,13 +11,14 @@ services:
       - NODE_ENV=production
 
       # ---------- SSO (optional) ----------
-      # Uncomment and fill in to enable Single Sign-On via any OIDC provider.
+      # Uncomment to enable Single Sign-On via any OIDC provider.
       # Tested with: Keycloak, Authelia, Authentik, Google Workspace
       #
-      # - SSO_ENABLED=true
-      # - SSO_ISSUER=https://auth.example.com/realms/myrealm
-      # - SSO_CLIENT_ID=ssh-manager
-      # - SSO_CLIENT_SECRET=your-client-secret
-      # - SSO_REDIRECT_URI=http://your-server:3000/auth/callback
-      # - SSO_ALLOWED_ROLES=ssh-manager-users  # optional: restrict by role/group
-      # - SESSION_SECRET=change-this-to-a-long-random-string
+      - SSO_ENABLED=true
+      - SSO_ISSUER=http://192.168.178.40:7080/realms/dev
+      - SSO_CLIENT_ID=ssh-manager                                                                                                                                                                           
+      - SSO_CLIENT_SECRET=iYliO5ozmWDmicBZi6DGJb8RYKfLQlp1                                                                                                                                                  
+      - SSO_REDIRECT_URI=http://192.168.178.97:3000/auth/callback                                                                                                                                           
+      # - SSO_ALLOWED_ROLES=ssh-manager-users  # optional: restrict by role/group                                                                                                                            
+      - SESSION_SECRET=dklgdskgjdlksgljsdgdljskgjlkdskjgkjsdlglkjdslkg
+      - SSO_POST_LOGOUT_URI=http://192.168.178.97:3000/
